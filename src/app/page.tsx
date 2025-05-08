@@ -4,23 +4,26 @@
 import { GameBoard } from '@/components/game/GameBoard';
 import { GameInfo } from '@/components/game/GameInfo';
 import { GameControls } from '@/components/game/GameControls';
+import { GameRules } from '@/components/game/GameRules';
 import { useDiagonalDomination } from '@/hooks/useDiagonalDomination';
-import { PAWNS_PER_PLAYER } from '@/config/game';
 import { Toaster } from "@/components/ui/toaster";
-
 
 export default function DiagonalDominationPage() {
   const {
     board,
     currentPlayer,
     gamePhase,
-    playerPawnsPlaced,
+    pawnsPlaced,
     selectedPawn,
     winner,
     winningLine,
-    playerAssignedColors,
+    // playerAssignedColors is now implicitly handled: P1 on light, P2 on dark
     handleSquareClick,
     resetGame,
+    pawnsPerPlayer,
+    changePawnsPerPlayerCount,
+    deadZones,
+    getPlayerSquareColor,
   } = useDiagonalDomination();
 
   return (
@@ -30,9 +33,9 @@ export default function DiagonalDominationPage() {
           currentPlayer={currentPlayer}
           gamePhase={gamePhase}
           winner={winner}
-          playerAssignedColors={playerAssignedColors}
-          pawnsPlaced={playerPawnsPlaced}
-          maxPawns={PAWNS_PER_PLAYER}
+          pawnsPlaced={pawnsPlaced}
+          maxPawns={pawnsPerPlayer} // Use pawnsPerPlayer from hook
+          getPlayerSquareColor={getPlayerSquareColor}
         />
         <GameBoard
           board={board}
@@ -40,10 +43,16 @@ export default function DiagonalDominationPage() {
           currentPlayer={currentPlayer}
           gamePhase={gamePhase}
           selectedPawn={selectedPawn}
-          playerAssignedColors={playerAssignedColors}
           winningLine={winningLine}
+          deadZones={deadZones}
+          getPlayerSquareColor={getPlayerSquareColor}
         />
-        <GameControls onReset={resetGame} />
+        <GameControls 
+          onReset={resetGame} 
+          pawnsPerPlayer={pawnsPerPlayer}
+          onPawnsChange={changePawnsPerPlayerCount}
+        />
+        <GameRules />
       </main>
       <Toaster />
     </>

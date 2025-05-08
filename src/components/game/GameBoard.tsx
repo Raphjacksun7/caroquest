@@ -1,5 +1,5 @@
 
-import type { GameBoardArray, Player, PawnPosition, GamePhase, PlayerAssignedColors, WinningLine } from '@/types/game';
+import type { GameBoardArray, Player, PawnPosition, GamePhase, WinningLine, DeadZone, SquareColorType } from '@/types/game';
 import { Square } from './Square';
 import { BOARD_SIZE } from '@/config/game';
 import { getSquareColorType } from '@/lib/gameUtils';
@@ -10,8 +10,9 @@ interface GameBoardProps {
   currentPlayer: Player;
   gamePhase: GamePhase;
   selectedPawn: PawnPosition | null;
-  playerAssignedColors: PlayerAssignedColors;
   winningLine: WinningLine | null;
+  deadZones: DeadZone[];
+  getPlayerSquareColor: (player: Player) => SquareColorType;
 }
 
 export const GameBoard = ({
@@ -20,33 +21,41 @@ export const GameBoard = ({
   currentPlayer,
   gamePhase,
   selectedPawn,
-  playerAssignedColors,
   winningLine,
+  deadZones,
+  getPlayerSquareColor,
 }: GameBoardProps) => {
   
   const isWinningSquare = (row: number, col: number) => {
     return winningLine?.positions.some(p => p.row === row && p.col === col) ?? false;
   };
 
-  const getIsValidMove = (row: number, col: number): boolean => {
-    const targetSquareColorType = getSquareColorType(row, col);
-    const currentPlayerAssignedColor = currentPlayer === 1 ? playerAssignedColors.player1 : playerAssignedColors.player2;
+  const getIsValidMoveForDisplay = (row: number, col: number): boolean => {
+    const targetBoardSquareColor = getSquareColorType(row, col);
+    const currentPlayerRequiredSquareColor = getPlayerSquareColor(currentPlayer);
+
+    if (targetBoardSquareColor !== currentPlayerRequiredSquareColor) return false;
+    if (board[row][col].player !== null) return false; // Can't move to occupied square
 
     if (gamePhase === 'PLACEMENT') {
-      return board[row][col].player === null && targetSquareColorType === currentPlayerAssignedColor;
+      return true; // Valid if empty and correct color
     }
     if (gamePhase === 'MOVEMENT' && selectedPawn) {
-      // Any empty square of assigned color is valid if a pawn is selected
-      return board[row][col].player === null && targetSquareColorType === currentPlayerAssignedColor;
+      // Any empty square of current player's assigned color is potentially valid for movement destination
+      // The hook's handleSquareClick will do final validation (e.g. if it's the same square)
+      return true;
     }
     return false;
   };
-
+  
+  const isSquareDeadZone = (row: number, col: number): boolean => {
+    return deadZones.some(dz => dz.row === row && dz.col === col);
+  };
 
   return (
     <div
       className="grid grid-cols-8 gap-0 border-2 border-foreground bg-background shadow-2xl rounded overflow-hidden relative"
-      style={{ width: `${BOARD_SIZE * 4}rem`, height: `${BOARD_SIZE * 4}rem` }} // Adjust size as needed
+      style={{ width: `${BOARD_SIZE * 4}rem`, height: `${BOARD_SIZE * 4}rem` }}
     >
       {board.map((rowSquares, rowIndex) =>
         rowSquares.map((squareData, colIndex) => (
@@ -57,12 +66,11 @@ export const GameBoard = ({
             squareData={squareData}
             squareColorType={getSquareColorType(rowIndex, colIndex)}
             onClick={onSquareClick}
-            currentPlayer={currentPlayer}
             gamePhase={gamePhase}
             selectedPawn={selectedPawn}
-            playerAssignedColors={playerAssignedColors}
             isWinningSquare={isWinningSquare(rowIndex, colIndex)}
-            isValidMove={getIsValidMove(rowIndex, colIndex)}
+            isValidMove={getIsValidMoveForDisplay(rowIndex, colIndex)}
+            isDeadZone={isSquareDeadZone(rowIndex, colIndex)}
           />
         ))
       )}

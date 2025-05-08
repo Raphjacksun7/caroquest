@@ -9,17 +9,24 @@ interface PawnProps {
 }
 
 export const Pawn = ({ player, isBlocked, isBlocking }: PawnProps) => {
+  const playerColorClass = player === 1 
+    ? 'bg-[hsl(var(--player1-pawn-color))]' 
+    : 'bg-[hsl(var(--player2-pawn-color))]';
+  
+  // isBlocked: opacity-50 ring-2 ring-offset-1 ring-[hsl(var(--highlight-blocked-pawn))]
+  // isBlocking: ring-2 ring-offset-1 ring-[hsl(var(--highlight-blocking-pawn-border))]
+
   return (
     <div
       className={cn(
         'w-3/4 h-3/4 rounded-full flex items-center justify-center shadow-md transition-all duration-150 ease-in-out',
-        player === 1 ? 'bg-[hsl(var(--player1-pawn-color))]' : 'bg-[hsl(var(--player2-pawn-color))]',
-        isBlocked && 'opacity-50 ring-2 ring-offset-1 ring-[hsl(var(--highlight-blocked-pawn))]',
+        playerColorClass,
+        isBlocked && 'opacity-50 ring-1 ring-offset-1 ring-[hsl(var(--highlight-blocked-pawn))]', // Adjusted ring for subtlety
         isBlocking && 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-blocking-pawn-border))]'
       )}
-      aria-label={`Player ${player} pawn`}
+      aria-label={`Player ${player} pawn ${isBlocked ? ' (blocked)' : ''}${isBlocking ? ' (blocking)' : ''}`}
     >
-      {/* Optionally, add a subtle inner gloss or icon */}
+      {/* Inner visual cue could be added, e.g. a smaller circle or icon if desired */}
     </div>
   );
 };
