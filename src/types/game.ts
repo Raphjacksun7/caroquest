@@ -13,6 +13,7 @@ export interface BoardSquareData {
   isBlocked: boolean;    // This pawn is blocked
   isBlocking: boolean;   // This pawn is part of a blocking formation
   isCreatingDeadZone: boolean; // This pawn is part of forming a dead zone and cannot be used in a winning line
+  isPartOfWinningLine: boolean; // This pawn is part of the highlighted winning line
 }
 
 export type GameBoardArray = BoardSquareData[][];
@@ -33,3 +34,10 @@ export interface DeadZone {
   player: Player; // Player for whom this square is a dead zone (cannot use for winning line)
 }
 
+export interface GameHistoryEntry {
+  player: Player;
+  action: 'place' | 'move';
+  from: PawnPosition | null;
+  to: PawnPosition;
+  timestamp: string; // ISO string
+}
