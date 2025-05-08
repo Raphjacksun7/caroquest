@@ -5,7 +5,7 @@ import { GameBoard } from '@/components/game/GameBoard';
 import { GameInfo } from '@/components/game/GameInfo';
 import { GameControls } from '@/components/game/GameControls';
 import { GameRules } from '@/components/game/GameRules';
-import { useDiagonalDomination } from '@/hooks/useDiagonalDomination';
+import { useDiagonalDomination } from '@/hooks/useDiagonalDomination'; // Corrected path if needed, or ensure file exists
 import { Toaster } from "@/components/ui/toaster";
 
 export default function DiagonalDominationPage() {
@@ -17,7 +17,6 @@ export default function DiagonalDominationPage() {
     selectedPawn,
     winner,
     winningLine,
-    // playerAssignedColors is now implicitly handled: P1 on light, P2 on dark
     handleSquareClick,
     resetGame,
     pawnsPerPlayer,
@@ -34,7 +33,7 @@ export default function DiagonalDominationPage() {
           gamePhase={gamePhase}
           winner={winner}
           pawnsPlaced={pawnsPlaced}
-          maxPawns={pawnsPerPlayer} // Use pawnsPerPlayer from hook
+          maxPawns={pawnsPerPlayer} 
           getPlayerSquareColor={getPlayerSquareColor}
         />
         <GameBoard
@@ -49,8 +48,8 @@ export default function DiagonalDominationPage() {
         />
         <GameControls 
           onReset={resetGame} 
-          pawnsPerPlayer={pawnsPerPlayer}
-          onPawnsChange={changePawnsPerPlayerCount}
+          pawnsPerPlayer={pawnsPerPlayer} // This is a number
+          onPawnsChange={changePawnsPerPlayerCount} // This expects a number
         />
         <GameRules />
       </main>
@@ -58,3 +57,5 @@ export default function DiagonalDominationPage() {
     </>
   );
 }
+
+    

@@ -1,314 +1,346 @@
 
-"use client";
+'use client';
 
-import { useState, useCallback, useEffect } from 'react';
-import type { Player, GamePhase, GameBoardArray, PawnPosition, PlayerAssignedColors, SquareColorType, WinningLine, DeadZone, BoardSquareData } from '@/types/game';
-import { BOARD_SIZE, WINNING_LINE_LENGTH, PAWNS_PER_PLAYER as DEFAULT_PAWNS_PER_PLAYER } from '@/config/game';
-import { getSquareColorType } from '@/lib/gameUtils';
+import { useState, useEffect, useCallback } from 'react';
+import type { GameBoardArray, Player, PawnPosition, GamePhase, WinningLine, DeadZone, SquareColorType, BoardSquareData } from '@/types/game';
+import { BOARD_SIZE, PAWNS_PER_PLAYER as DEFAULT_PAWNS_PER_PLAYER, WINNING_LINE_LENGTH } from '@/config/game';
+import { getSquareColorType as getBoardSquareColorType } from '@/lib/gameUtils';
 import { useToast } from "@/hooks/use-toast";
 
-
-const createInitialBoard = (): GameBoardArray =>
-  Array(BOARD_SIZE)
-    .fill(null)
-    .map(() =>
-      Array(BOARD_SIZE)
-        .fill(null)
-        .map((): BoardSquareData => ({
-          player: null,
-          isBlocked: false,
-          isBlocking: false,
-          isCreatingDeadZone: false, // Initialize new property
-        }))
-    );
-
 export const useDiagonalDomination = () => {
-  const [board, setBoard] = useState<GameBoardArray>(createInitialBoard());
+  const { toast } = useToast();
+  const [board, setBoard] = useState<GameBoardArray>([]);
   const [currentPlayer, setCurrentPlayer] = useState<Player>(1);
   const [selectedPawn, setSelectedPawn] = useState<PawnPosition | null>(null);
-  const [gamePhase, setGamePhase] = useState<GamePhase>('PLACEMENT');
+  const [gamePhase, setGamePhase] = useState<GamePhase>('PLACEMENT'); // 'PLAYER_SETUP' can be used if there's async setup
   const [winner, setWinner] = useState<Player | null>(null);
-  const [pawnsPlaced, setPawnsPlaced] = useState<{ [key in Player]: number }>({ 1: 0, 2: 0 });
+  const [player1PawnsPlaced, setPlayer1PawnsPlaced] = useState(0);
+  const [player2PawnsPlaced, setPlayer2PawnsPlaced] = useState(0);
   const [pawnsPerPlayer, setPawnsPerPlayer] = useState<number>(DEFAULT_PAWNS_PER_PLAYER);
   const [deadZones, setDeadZones] = useState<DeadZone[]>([]);
   const [winningLine, setWinningLine] = useState<WinningLine | null>(null);
-  const { toast } = useToast();
-
-  const playerAssignedColors: PlayerAssignedColors = { player1: 'light', player2: 'dark' };
 
   const getPlayerSquareColor = useCallback((player: Player): SquareColorType => {
-    return player === 1 ? playerAssignedColors.player1 : playerAssignedColors.player2;
-  }, [playerAssignedColors]);
+    return player === 1 ? 'light' : 'dark';
+  }, []);
 
-  const initializeBoard = useCallback(() => {
-    setBoard(createInitialBoard());
+  const initializeNewBoard = useCallback((): GameBoardArray => {
+    const newBoard: GameBoardArray = [];
+    for (let row = 0; row < BOARD_SIZE; row++) {
+      const boardRow: BoardSquareData[] = [];
+      for (let col = 0; col < BOARD_SIZE; col++) {
+        boardRow.push({
+          player: null,
+          isBlocked: false,
+          isBlocking: false,
+          isCreatingDeadZone: false,
+        });
+      }
+      newBoard.push(boardRow);
+    }
+    return newBoard;
+  }, []);
+  
+  const resetGame = useCallback(() => {
+    setBoard(initializeNewBoard());
     setCurrentPlayer(1);
     setSelectedPawn(null);
     setGamePhase('PLACEMENT');
     setWinner(null);
-    setPawnsPlaced({ 1: 0, 2: 0 });
+    setPlayer1PawnsPlaced(0);
+    setPlayer2PawnsPlaced(0);
     setDeadZones([]);
     setWinningLine(null);
-  }, []);
+    if (typeof pawnsPerPlayer === 'number' && pawnsPerPlayer > 0) { // Ensure pawnsPerPlayer is valid before toasting
+        toast({ title: "Game Reset", description: `New game started with ${pawnsPerPlayer} pawns per player.` });
+    }
+  }, [toast, initializeNewBoard]);
 
   useEffect(() => {
-    initializeBoard();
-  }, [pawnsPerPlayer, initializeBoard]);
+    // Initialize board on mount and when pawnsPerPlayer changes
+    resetGame();
+  }, [resetGame]);
 
 
-  const checkWinCondition = useCallback((currentBoard: GameBoardArray, player: Player, currentDeadZones: DeadZone[]): boolean => {
-    const isValidAndEligibleForWin = (r: number, c: number) => {
-      if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) return false;
-      const square = currentBoard[r][c];
-      return square.player === player && !square.isBlocked && !square.isBlocking && !square.isCreatingDeadZone;
-    };
+  const updateBoardStateLogic = useCallback((currentBoard: GameBoardArray, forPlayer: Player): { updatedBoard: GameBoardArray, newDeadZonesForOpponent: DeadZone[] } => {
+    const newBoard = currentBoard.map(r => r.map(s => ({...s}))); // Deep copy
+    const newDeadZonesForOpponentList: DeadZone[] = [];
 
-    const isSquareDeadZoneForPlayer = (r: number, c: number) => {
-      return currentDeadZones.some(dz => dz.row === r && dz.col === c && dz.player === player);
-    };
-
-    const directions = [
-      { dr: 1, dc: 1 }, // Diagonal down-right
-      { dr: 1, dc: -1 }, // Diagonal down-left
-    ];
-
+    // Reset statuses that depend on current player's action or opponent's pieces
     for (let r = 0; r < BOARD_SIZE; r++) {
       for (let c = 0; c < BOARD_SIZE; c++) {
-        if (!isValidAndEligibleForWin(r, c)) continue; // Initial piece must be valid for win
-
-        for (const { dr, dc } of directions) {
-          const line: PawnPosition[] = [{ row: r, col: c }];
-          let count = 1;
-          let linePassesThroughDeadZone = isSquareDeadZoneForPlayer(r,c); // Check first piece
-
-          if (linePassesThroughDeadZone) continue; // First piece cannot be on a dead zone
-
-          for (let i = 1; i < WINNING_LINE_LENGTH; i++) {
-            const nr = r + dr * i;
-            const nc = c + dc * i;
-            if (isValidAndEligibleForWin(nr, nc)) {
-              if (isSquareDeadZoneForPlayer(nr,nc)) {
-                linePassesThroughDeadZone = true;
-                break; 
-              }
-              line.push({ row: nr, col: nc });
-              count++;
-            } else {
-              break;
-            }
-          }
-          if (count === WINNING_LINE_LENGTH && !linePassesThroughDeadZone) {
-            setWinner(player);
-            setWinningLine({ player, positions: line });
-            setGamePhase('GAME_OVER');
-            toast({ title: `Player ${player} (${player === 1 ? "Red" : "Blue"}) Wins!`, description: "Congratulations!" });
-            return true;
-          }
-        }
+        newBoard[r][c].isBlocked = false;
+        newBoard[r][c].isBlocking = false;
+        newBoard[r][c].isCreatingDeadZone = false; 
       }
     }
-    return false;
-  }, [toast]);
 
-  const updateBoardState = useCallback((currentBoard: GameBoardArray, playerWhoMoved: Player) => {
-    let newBoard = currentBoard.map(row => row.map(cell => ({ 
-        ...cell, 
-        isBlocked: false, 
-        isBlocking: false,
-        isCreatingDeadZone: false, // Reset this as well
-    })));
+    const opponentPlayer = forPlayer === 1 ? 2 : 1;
 
-    // Check for horizontal blocks (O-X-O)
+    // Blocking logic (Rule 4.1)
+    // Check horizontal blocks (forPlayer blocks opponentPlayer)
     for (let r = 0; r < BOARD_SIZE; r++) {
       for (let c = 0; c < BOARD_SIZE - 2; c++) {
-        const p1 = newBoard[r][c].player;
-        const p2 = newBoard[r][c+1].player;
-        const p3 = newBoard[r][c+2].player;
-
-        if (p1 && p2 && p3 && p1 === p3 && p1 !== p2) {
+        if (newBoard[r][c].player === forPlayer && newBoard[r][c+1].player === opponentPlayer && newBoard[r][c+2].player === forPlayer) {
           newBoard[r][c].isBlocking = true;
           newBoard[r][c+1].isBlocked = true;
           newBoard[r][c+2].isBlocking = true;
         }
       }
     }
-    // Check for vertical blocks (O-X-O)
-     for (let c = 0; c < BOARD_SIZE; c++) {
+    // Check vertical blocks
+    for (let c = 0; c < BOARD_SIZE; c++) {
       for (let r = 0; r < BOARD_SIZE - 2; r++) {
-        const p1 = newBoard[r][c].player;
-        const p2 = newBoard[r+1][c].player;
-        const p3 = newBoard[r+2][c].player;
-
-        if (p1 && p2 && p3 && p1 === p3 && p1 !== p2) {
+        if (newBoard[r][c].player === forPlayer && newBoard[r+1][c].player === opponentPlayer && newBoard[r+2][c].player === forPlayer) {
           newBoard[r][c].isBlocking = true;
           newBoard[r+1][c].isBlocked = true;
           newBoard[r+2][c].isBlocking = true;
         }
       }
     }
-
-    // Update dead zones and mark pawns creating them
-    const newDeadZones: DeadZone[] = [];
     
-    // Horizontal dead zones
+    // Dead Zone Creation & Marking Pawns Creating Dead Zones (Rule: My Pawn - empty space of my color - My Pawn)
+    // Horizontal dead zones created by forPlayer for opponentPlayer
     for (let r = 0; r < BOARD_SIZE; r++) {
       for (let c = 0; c < BOARD_SIZE - 2; c++) {
-        const s1 = newBoard[r][c];
-        const s2_empty = newBoard[r][c+1];
-        const s3 = newBoard[r][c+2];
-        const s1Color = getPlayerSquareColor(s1.player as Player); // Safe if s1.player is not null
-        const s2Color = getSquareColorType(r, c+1);
-
-        if (s1.player && s2_empty.player === null && s3.player && s1.player === s3.player && s1Color === s2Color) {
-          newDeadZones.push({ row: r, col: c+1, player: s1.player === 1 ? 2 : 1 }); // Dead zone for opponent
-          s1.isCreatingDeadZone = true;
-          s3.isCreatingDeadZone = true;
+        if (newBoard[r][c].player === forPlayer &&
+            newBoard[r][c+1].player === null && getBoardSquareColorType(r, c+1) === getPlayerSquareColor(forPlayer) &&
+            newBoard[r][c+2].player === forPlayer) {
+          newDeadZonesForOpponentList.push({ row: r, col: c + 1, player: opponentPlayer }); // Dead zone FOR opponentPlayer
+          newBoard[r][c].isCreatingDeadZone = true;
+          newBoard[r][c+2].isCreatingDeadZone = true;
         }
       }
     }
-    // Vertical dead zones
+    // Vertical dead zones created by forPlayer for opponentPlayer
     for (let c = 0; c < BOARD_SIZE; c++) {
       for (let r = 0; r < BOARD_SIZE - 2; r++) {
-        const s1 = newBoard[r][c];
-        const s2_empty = newBoard[r+1][c];
-        const s3 = newBoard[r+2][c];
-        const s1Color = getPlayerSquareColor(s1.player as Player);
-        const s2Color = getSquareColorType(r+1, c);
-
-        if (s1.player && s2_empty.player === null && s3.player && s1.player === s3.player && s1Color === s2Color) {
-          newDeadZones.push({ row: r+1, col: c, player: s1.player === 1 ? 2 : 1 }); // Dead zone for opponent
-          s1.isCreatingDeadZone = true;
-          s3.isCreatingDeadZone = true;
+        if (newBoard[r][c].player === forPlayer &&
+            newBoard[r+1][c].player === null && getBoardSquareColorType(r+1, c) === getPlayerSquareColor(forPlayer) &&
+            newBoard[r+2][c].player === forPlayer) {
+          newDeadZonesForOpponentList.push({ row: r + 1, col: c, player: opponentPlayer }); // Dead zone FOR opponentPlayer
+          newBoard[r][c].isCreatingDeadZone = true;
+          newBoard[r+2][c].isCreatingDeadZone = true;
         }
       }
     }
+    return { updatedBoard: newBoard, newDeadZonesForOpponent: newDeadZonesForOpponentList };
+  }, [getPlayerSquareColor]);
 
-    setDeadZones(newDeadZones);
-    setBoard(newBoard); 
 
-    if (checkWinCondition(newBoard, playerWhoMoved, newDeadZones)) {
-        return; 
+  const checkWinCondition = useCallback((currentBoard: GameBoardArray, player: Player, currentAllDeadZones: DeadZone[]): WinningLine | null => {
+    const isValidForWin = (r: number, c: number): boolean => {
+      if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) return false;
+      const square = currentBoard[r][c];
+      // Pawns that are blocked, actively blocking, or creating dead zones cannot be part of a winning diagonal
+      return square.player === player && !square.isBlocked && !square.isBlocking && !square.isCreatingDeadZone;
+    };
+
+    // A square in the potential winning line cannot be a dead zone FOR THE CURRENT PLAYER.
+    const isSquareInDeadZoneForThisPlayer = (r: number, c: number): boolean => {
+      return currentAllDeadZones.some(dz => dz.row === r && dz.col === c && dz.player === player);
+    };
+
+    const directions = [ { dr: 1, dc: 1 }, { dr: 1, dc: -1 } ]; // Check two main diagonal directions
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        // Start checking from a valid pawn that is not in its own dead zone
+        if (!isValidForWin(r, c) || isSquareInDeadZoneForThisPlayer(r,c)) continue;
+
+        for (const { dr, dc } of directions) {
+          const line: PawnPosition[] = [{ row: r, col: c }];
+          let possibleWin = true;
+          for (let i = 1; i < WINNING_LINE_LENGTH; i++) {
+            const nr = r + i * dr;
+            const nc = c + i * dc;
+            if (!isValidForWin(nr, nc) || isSquareInDeadZoneForThisPlayer(nr,nc)) {
+              possibleWin = false;
+              break;
+            }
+            line.push({ row: nr, col: nc });
+          }
+          if (possibleWin) {
+            return { player, positions: line };
+          }
+        }
+      }
     }
+    return null;
+  }, []);
 
-    setCurrentPlayer(playerWhoMoved === 1 ? 2 : 1);
 
-  }, [checkWinCondition, getPlayerSquareColor]);
+  const afterTurnProcessing = useCallback((interimBoard: GameBoardArray, playerMakingMove: Player) => {
+    const opponentOfPlayerMakingMove = playerMakingMove === 1 ? 2 : 1;
+
+    // Calculate state based on playerMakingMove's action
+    const { updatedBoard: boardAfterPlayerMove, newDeadZonesForOpponent: deadZonesCreatedByPlayer } = updateBoardStateLogic(interimBoard, playerMakingMove);
+    
+    // Now, re-evaluate for the opponent based on the new board state (e.g., if playerMakingMove unblocked opponent's pieces)
+    // This will also determine dead zones created by the opponent FOR playerMakingMove.
+    const { updatedBoard: finalBoardState, newDeadZonesForOpponent: deadZonesCreatedByOpponent } = updateBoardStateLogic(boardAfterPlayerMove, opponentOfPlayerMakingMove);
+
+    const allCurrentDeadZones = [...deadZonesCreatedByPlayer, ...deadZonesCreatedByOpponent];
+    
+    setBoard(finalBoardState);
+    setDeadZones(allCurrentDeadZones);
+
+    const winCheck = checkWinCondition(finalBoardState, playerMakingMove, allCurrentDeadZones);
+    if (winCheck) {
+      setWinner(playerMakingMove);
+      setWinningLine(winCheck);
+      setGamePhase('GAME_OVER');
+      toast({ title: "Game Over!", description: `Player ${playerMakingMove} wins!` });
+      return true; // Game ended
+    }
+    return false; // Game continues
+  }, [updateBoardStateLogic, checkWinCondition, toast]);
 
 
   const placePawn = useCallback((row: number, col: number) => {
     const opponent = currentPlayer === 1 ? 2 : 1;
-    // Check for restricted zone placement by opponent
-    // Horizontal check: OpponentPawn - (row,col) - OpponentPawn
+    let newBoard = board.map(r => r.map(s => ({...s}))); // Create a mutable copy
+
+    // Restricted Placement Check (Rule 4.4 "Restricted Zones")
+    // "If a player places two pawns with a space between them horizontally (My Pawn - empty space - My Pawn), 
+    // the opponent cannot place their pawn in that empty space."
+    // This means if `opponent` has created such a zone, `currentPlayer` cannot place in `(row, col)`.
+    let isPlacementRestricted = false;
+    // Horizontal: OpponentPawn - (row,col) - OpponentPawn
     if (col > 0 && col < BOARD_SIZE - 1 &&
-        board[row][col-1].player === opponent &&
-        board[row][col+1].player === opponent &&
-        getSquareColorType(row,col) === getPlayerSquareColor(currentPlayer) ) { // Must be on player's color
-      toast({ title: "Restricted Zone", description: "Cannot place pawn in opponent's horizontal restricted zone.", variant: "destructive" });
-      return;
+        newBoard[row][col-1].player === opponent && 
+        newBoard[row][col+1].player === opponent &&
+        getBoardSquareColorType(row, col) === getPlayerSquareColor(currentPlayer)) { // square must be of current player's color
+            isPlacementRestricted = true;
     }
-    // Vertical check: OpponentPawn - (row,col) - OpponentPawn
-    if (row > 0 && row < BOARD_SIZE - 1 &&
-        board[row-1][col].player === opponent &&
-        board[row+1][col].player === opponent &&
-        getSquareColorType(row,col) === getPlayerSquareColor(currentPlayer) ) {
-      toast({ title: "Restricted Zone", description: "Cannot place pawn in opponent's vertical restricted zone.", variant: "destructive" });
+    // Vertical: OpponentPawn - (row,col) - OpponentPawn
+    if (!isPlacementRestricted && row > 0 && row < BOARD_SIZE - 1 &&
+        newBoard[row-1][col].player === opponent && 
+        newBoard[row+1][col].player === opponent &&
+        getBoardSquareColorType(row, col) === getPlayerSquareColor(currentPlayer)) {
+            isPlacementRestricted = true;
+    }
+
+    if (isPlacementRestricted) {
+      toast({ title: "Invalid Placement", description: "You cannot place a pawn in a zone restricted by your opponent.", variant: "destructive" });
       return;
     }
 
-
-    const newBoard = board.map(r => r.map(s => ({ ...s })));
     newBoard[row][col].player = currentPlayer;
-
-    const newPawnsPlacedCount = pawnsPlaced[currentPlayer] + 1;
-    setPawnsPlaced(prev => ({ ...prev, [currentPlayer]: newPawnsPlacedCount }));
-
-    if (newPawnsPlacedCount === pawnsPerPlayer && pawnsPlaced[currentPlayer === 1 ? 2 : 1] === pawnsPerPlayer) {
-      setGamePhase('MOVEMENT');
-    }
     
-    updateBoardState(newBoard, currentPlayer);
+    let currentP1Pawns = player1PawnsPlaced;
+    let currentP2Pawns = player2PawnsPlaced;
 
-  }, [board, currentPlayer, pawnsPlaced, pawnsPerPlayer, updateBoardState, toast, getPlayerSquareColor]);
+    if (currentPlayer === 1) {
+      currentP1Pawns++;
+      setPlayer1PawnsPlaced(currentP1Pawns);
+    } else {
+      currentP2Pawns++;
+      setPlayer2PawnsPlaced(currentP2Pawns);
+    }
+
+    if (afterTurnProcessing(newBoard, currentPlayer)) return; // Win check happened
+
+    if (currentP1Pawns === pawnsPerPlayer && currentP2Pawns === pawnsPerPlayer) {
+      setGamePhase('MOVEMENT');
+      toast({ title: "Phase Change", description: "All pawns placed. Movement phase begins." });
+    }
+    setCurrentPlayer(opponent);
+
+  }, [afterTurnProcessing, toast, getPlayerSquareColor, board, currentPlayer, player1PawnsPlaced, player2PawnsPlaced, pawnsPerPlayer]);
+
 
   const movePawn = useCallback((fromRow: number, fromCol: number, toRow: number, toCol: number) => {
-    const newBoard = board.map(r => r.map(s => ({ ...s })));
+    const opponent = currentPlayer === 1 ? 2 : 1;
+    let newBoard = board.map(r => r.map(s => ({...s})));
+    
     newBoard[toRow][toCol].player = currentPlayer;
     newBoard[fromRow][fromCol].player = null;
     
     setSelectedPawn(null);
-    updateBoardState(newBoard, currentPlayer);
 
-  }, [board, currentPlayer, updateBoardState]);
-
+    if (afterTurnProcessing(newBoard, currentPlayer)) return; // Win check happened
+    
+    setCurrentPlayer(opponent);
+  }, [afterTurnProcessing, board, currentPlayer]);
 
   const handleSquareClick = useCallback((row: number, col: number) => {
     if (winner || gamePhase === 'GAME_OVER') return;
 
-    const square = board[row][col];
-    const clickedSquareColor = getSquareColorType(row, col);
-    const currentPlayerRequiredSquareColor = getPlayerSquareColor(currentPlayer);
+    const clickedSquareData = board[row][col]; // Already a copy from board state
+    const clickedActualSquareColor = getBoardSquareColorType(row, col);
+    const currentPlayerRequiredColor = getPlayerSquareColor(currentPlayer);
 
-    if (clickedSquareColor !== currentPlayerRequiredSquareColor) {
-      toast({ title: "Invalid Square", description: "You can only use squares of your assigned color.", variant: "destructive" });
+    if (clickedActualSquareColor !== currentPlayerRequiredColor) {
+      toast({ title: "Invalid Square", description: "You must play on squares of your assigned color.", variant: "destructive" });
       return;
     }
 
     if (gamePhase === 'PLACEMENT') {
-      if (square.player === null) {
-        if (pawnsPlaced[currentPlayer] < pawnsPerPlayer) {
-          placePawn(row, col);
-        } else {
-          toast({ title: "Placement Limit", description: "You have placed all your pawns.", variant: "destructive" });
-        }
+      if (clickedSquareData.player === null) {
+        placePawn(row, col);
       } else {
         toast({ title: "Occupied Square", description: "This square is already occupied.", variant: "destructive" });
       }
     } else if (gamePhase === 'MOVEMENT') {
-      if (selectedPawn === null) { 
-        if (square.player === currentPlayer && !square.isBlocked) { // Cannot select a blocked pawn to move
+      if (selectedPawn === null) { // Attempting to select a pawn
+        if (clickedSquareData.player === currentPlayer) {
+          if (clickedSquareData.isBlocked) {
+            toast({ title: "Blocked Pawn", description: "This pawn is blocked and cannot move.", variant: "destructive" });
+            return;
+          }
           setSelectedPawn({ row, col });
-        } else if (square.player === currentPlayer && square.isBlocked) {
-           toast({ title: "Blocked Pawn", description: "This pawn is blocked and cannot move.", variant: "destructive" });
-        } else if (square.player !== null) {
-          toast({ title: "Invalid Selection", description: "Not your pawn.", variant: "destructive" });
+        } else if (clickedSquareData.player !== null) {
+          toast({ title: "Not Your Pawn", description: "You can only select your own pawns.", variant: "destructive" });
         } else {
            toast({ title: "Empty Square", description: "Select one of your pawns to move.", variant: "destructive" });
         }
-      } else { 
-        if (row === selectedPawn.row && col === selectedPawn.col) {
-            setSelectedPawn(null); 
-            return;
-        }
-        if (square.player === null) {
-          movePawn(selectedPawn.row, selectedPawn.col, row, col);
-        } else {
-          toast({ title: "Invalid Move", description: "You can't move to an occupied square.", variant: "destructive" });
-          // Keep pawn selected if move is invalid to an occupied square for retrying
-          // setSelectedPawn(null); 
+      } else { // Attempting to move the selectedPawn
+        if (clickedSquareData.player === null) { // Target square is empty
+          // Check if target is the same as selected (deselect)
+          if (selectedPawn.row === row && selectedPawn.col === col) {
+            setSelectedPawn(null);
+          } else {
+            movePawn(selectedPawn.row, selectedPawn.col, row, col);
+          }
+        } else { // Target square is occupied
+           toast({ title: "Occupied Target", description: "You cannot move to an occupied square.", variant: "destructive" });
+           // Optionally deselect if player clicks another of their own pawns
+           if (clickedSquareData.player === currentPlayer && !clickedSquareData.isBlocked) {
+             setSelectedPawn({row, col});
+           } else {
+             setSelectedPawn(null);
+           }
         }
       }
     }
-  }, [winner, gamePhase, board, currentPlayer, getPlayerSquareColor, pawnsPlaced, pawnsPerPlayer, placePawn, movePawn, selectedPawn, toast]);
+  }, [board, currentPlayer, getPlayerSquareColor, selectedPawn, placePawn, movePawn, toast, winner, gamePhase]);
+
 
   const changePawnsPerPlayerCount = useCallback((count: number) => {
-    const newCount = Math.max(3, Math.min(10, count)); 
-    setPawnsPerPlayer(newCount);
-  }, []);
+    if (count >= 3 && count <= 10) {
+      setPawnsPerPlayer(count);
+      // The useEffect for pawnsPerPlayer will call resetGame
+    } else {
+      toast({ title: "Invalid Input", description: "Pawns per player must be between 3 and 10.", variant: "destructive" });
+    }
+  }, [toast]);
 
   return {
     board,
     currentPlayer,
     gamePhase,
-    pawnsPlaced,
+    pawnsPlaced: { 1: player1PawnsPlaced, 2: player2PawnsPlaced },
     selectedPawn,
     winner,
     winningLine,
-    playerAssignedColors,
     handleSquareClick,
-    resetGame: initializeBoard,
+    resetGame,
     pawnsPerPlayer,
     changePawnsPerPlayerCount,
-    deadZones,
+    deadZones, // This should be all dead zones for UI rendering purposes
     getPlayerSquareColor,
   };
 };
+
+    
