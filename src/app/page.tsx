@@ -1,11 +1,10 @@
-
 "use client";
 
 import { GameBoard } from '@/components/game/GameBoard';
 import { GameInfo } from '@/components/game/GameInfo';
 import { GameControls } from '@/components/game/GameControls';
 import { GameRules } from '@/components/game/GameRules';
-import { useDiagonalDomination } from '@/hooks/useDiagonalDomination'; // Corrected path if needed, or ensure file exists
+import { useDiagonalDomination } from '@/hooks/useDiagonalDomination';
 import { Toaster } from "@/components/ui/toaster";
 
 export default function DiagonalDominationPage() {
@@ -23,6 +22,9 @@ export default function DiagonalDominationPage() {
     changePawnsPerPlayerCount,
     deadZones,
     getPlayerSquareColor,
+    handlePawnDragStart,
+    handlePawnDrop,
+    getValidMoveTargets,
   } = useDiagonalDomination();
 
   return (
@@ -38,18 +40,21 @@ export default function DiagonalDominationPage() {
         />
         <GameBoard
           board={board}
-          onSquareClick={handleSquareClick}
           currentPlayer={currentPlayer}
           gamePhase={gamePhase}
           selectedPawn={selectedPawn}
           winningLine={winningLine}
           deadZones={deadZones}
           getPlayerSquareColor={getPlayerSquareColor}
+          getValidMoveTargets={getValidMoveTargets}
+          onSquareClick={handleSquareClick}
+          onPawnDragStart={handlePawnDragStart}
+          onPawnDrop={handlePawnDrop}
         />
         <GameControls 
           onReset={resetGame} 
-          pawnsPerPlayer={pawnsPerPlayer} // This is a number
-          onPawnsChange={changePawnsPerPlayerCount} // This expects a number
+          pawnsPerPlayer={pawnsPerPlayer}
+          onPawnsChange={changePawnsPerPlayerCount}
         />
         <GameRules />
       </main>
@@ -57,5 +62,3 @@ export default function DiagonalDominationPage() {
     </>
   );
 }
-
-    

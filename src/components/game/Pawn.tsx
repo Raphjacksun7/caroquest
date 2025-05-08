@@ -1,4 +1,3 @@
-
 import type { Player } from '@/types/game';
 import { cn } from '@/lib/utils';
 
@@ -17,15 +16,15 @@ export const Pawn = ({ player, isBlocked, isBlocking, isCreatingDeadZone }: Pawn
   return (
     <div
       className={cn(
-        'w-3/4 h-3/4 rounded-full flex items-center justify-center shadow-md transition-all duration-150 ease-in-out',
+        'w-3/4 h-3/4 rounded-full flex items-center justify-center shadow-md transition-all duration-150 ease-in-out border-2 border-transparent', // Added transparent border for layout consistency
         playerColorClass,
-        isBlocked && 'opacity-50 ring-1 ring-offset-1 ring-[hsl(var(--highlight-blocked-pawn))]',
-        isBlocking && 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-blocking-pawn-border))]',
-        isCreatingDeadZone && 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-creating-dead-zone-pawn-border))]'
+        isBlocked && 'opacity-50 ring-1 ring-offset-1 ring-[hsl(var(--highlight-blocked-pawn))]', // Ring for blocked
+        isBlocking && 'border-[hsl(var(--highlight-blocking-pawn-border))]', // Border for blocking
+        isCreatingDeadZone && 'border-[hsl(var(--highlight-creating-dead-zone-pawn-border))]' // Border for creating dead zone
       )}
       aria-label={`Player ${player} pawn ${isBlocked ? ' (blocked)' : ''}${isBlocking ? ' (blocking)' : ''}${isCreatingDeadZone ? ' (creating dead zone)' : ''}`}
     >
-      {/* Inner visual cue could be added, e.g. a smaller circle or icon if desired */}
+      {/* Inner visual cue could be added here if desired */}
     </div>
   );
 };
