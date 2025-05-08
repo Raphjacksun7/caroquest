@@ -8,73 +8,87 @@ body {
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    --background: 220 20% 96%; /* Light gray background */
+    --foreground: 220 15% 20%; /* Dark gray text */
+
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card-foreground: 220 15% 20%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --popover-foreground: 220 15% 20%;
+
+    --primary: 182 41% 76%; /* Teal accent #A8DADC */
+    --primary-foreground: 220 15% 10%;
+
+    --secondary: 210 40% 90%; /* Lighter secondary for UI elements */
+    --secondary-foreground: 220 15% 20%;
+
+    --muted: 210 40% 92%;
+    --muted-foreground: 220 15% 45%;
+
+    --accent: 182 41% 70%; /* Slightly darker teal for hover states */
+    --accent-foreground: 220 15% 10%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 30% 85%;
+    --input: 210 30% 88%;
+    --ring: 182 41% 65%; /* Teal for focus rings */
+
     --radius: 0.5rem;
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Custom game colors */
+    --board-light-square: 39 56% 83%; /* Beige #F0D9B5 */
+    --board-dark-square: 30 31% 55%; /* Brown #B58863 */
+    --player1-pawn-color: 356 77% 59%; /* Warm Red #E63946 */
+    --player2-pawn-color: 207 39% 44%; /* Cool Blue #457B9D */
+    --highlight-valid-move: 120 60% 70%; /* Soft green for valid moves */
+    --highlight-selected-pawn: 60 100% 75%; /* Yellow for selected pawn */
+    --highlight-blocked-pawn: 0 0% 60%; /* Gray for blocked pawn */
+    --highlight-blocking-pawn-border: 0 80% 60%; /* Orange border for blocking pawn */
+    --highlight-dead-zone: 300 50% 70%; /* Purpleish for dead zones */
+    --highlight-win-line: 50 100% 50%; /* Gold for win line */
   }
+
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --background: 220 15% 10%;
+    --foreground: 210 30% 90%;
+
+    --card: 220 15% 12%;
+    --card-foreground: 210 30% 90%;
+    --popover: 220 15% 12%;
+    --popover-foreground: 210 30% 90%;
+
+    --primary: 182 41% 60%; /* Teal accent */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 15% 20%;
+    --secondary-foreground: 210 30% 90%;
+
+    --muted: 220 15% 22%;
+    --muted-foreground: 210 30% 65%;
+
+    --accent: 182 41% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 60% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 25%;
+    --input: 220 15% 28%;
+    --ring: 182 41% 50%;
+
+    /* Custom game colors for dark mode - adjust if needed, for now using light mode values */
+    --board-light-square: 39 40% 70%; /* Darker Beige */
+    --board-dark-square: 30 25% 40%; /* Darker Brown */
+    --player1-pawn-color: 356 77% 65%;
+    --player2-pawn-color: 207 39% 55%;
+    --highlight-valid-move: 120 50% 50%;
+    --highlight-selected-pawn: 60 80% 60%;
+    --highlight-blocked-pawn: 0 0% 50%;
+    --highlight-blocking-pawn-border: 0 70% 50%;
+    --highlight-dead-zone: 300 40% 60%;
+    --highlight-win-line: 50 90% 55%;
   }
 }
 
