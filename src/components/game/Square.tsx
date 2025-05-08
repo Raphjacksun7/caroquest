@@ -12,8 +12,8 @@ interface SquareProps {
   gamePhase: GamePhase;
   selectedPawn: PawnPosition | null;
   isWinningSquare: boolean;
-  isValidMove: boolean; // For display indication
-  isDeadZone: boolean;
+  isValidMove: boolean; 
+  isDeadZone: boolean; // This should be true if the square is a dead zone FOR THE CURRENT PLAYER
 }
 
 export const Square = ({
@@ -26,34 +26,25 @@ export const Square = ({
   selectedPawn,
   isWinningSquare,
   isValidMove,
-  isDeadZone,
+  isDeadZone, 
 }: SquareProps) => {
-  const { player, isBlocked, isBlocking } = squareData;
+  const { player, isBlocked, isBlocking, isCreatingDeadZone } = squareData;
   const isSelected = selectedPawn?.row === row && selectedPawn?.col === col;
 
-  // Base square color
   const squareBgColor = squareColorType === 'light' 
     ? 'bg-[hsl(var(--board-light-square))]' 
     : 'bg-[hsl(var(--board-dark-square))]';
 
-  // Highlighting:
-  // For selected pawn's square: ring-[hsl(var(--highlight-selected-pawn))]
-  // For valid move target: bg-[hsl(var(--highlight-valid-move))] (needs to work with base square color)
-  // For winning square: bg-[hsl(var(--highlight-win-line))]
-  
   let conditionalClasses = '';
   if (isSelected) {
     conditionalClasses = 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))]';
   } else if (isValidMove && !player) {
-    // For valid moves, we want to blend the highlight color with the base square color or make it distinct
-    // Using opacity on the highlight color itself.
     conditionalClasses = 'bg-[hsl(var(--highlight-valid-move))] bg-opacity-70 hover:bg-opacity-100';
   }
 
   if (isWinningSquare) {
     conditionalClasses = `${conditionalClasses} bg-[hsl(var(--highlight-win-line))] bg-opacity-80 animate-pulse`;
   }
-
 
   return (
     <button
@@ -63,13 +54,13 @@ export const Square = ({
         squareBgColor,
         conditionalClasses
       )}
-      aria-label={`Square ${row}, ${col}, ${squareColorType}, ${player ? `Player ${player} piece` : 'Empty'}${isBlocked ? ', Blocked' : ''}${isBlocking ? ', Blocking' : ''}${isDeadZone ? ', Dead Zone' : ''}`}
+      aria-label={`Square ${row}, ${col}, ${squareColorType}, ${player ? `Player ${player} piece` : 'Empty'}${isBlocked ? ', Blocked' : ''}${isBlocking ? ', Blocking' : ''}${isDeadZone ? ', Dead Zone for current player' : ''}`}
       disabled={gamePhase === 'GAME_OVER'}
     >
-      {isDeadZone && player === null && ( // Show X only on empty dead zone squares
-         <div className="absolute inset-0 flex items-center justify-center text-destructive opacity-30 text-3xl font-bold pointer-events-none">X</div>
+      {isDeadZone && player === null && ( 
+         <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-50 text-3xl font-bold pointer-events-none">X</div>
       )}
-      {player && <Pawn player={player} isBlocked={isBlocked} isBlocking={isBlocking} />}
+      {player && <Pawn player={player} isBlocked={isBlocked} isBlocking={isBlocking} isCreatingDeadZone={isCreatingDeadZone} />}
     </button>
   );
 };

@@ -1,3 +1,4 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -46,7 +47,8 @@ body {
     --highlight-selected-pawn: 60 100% 75%; /* Yellow for selected pawn */
     --highlight-blocked-pawn: 0 0% 60%; /* Gray for blocked pawn */
     --highlight-blocking-pawn-border: 0 80% 60%; /* Orange border for blocking pawn */
-    --highlight-dead-zone: 300 50% 70%; /* Purpleish for dead zones */
+    --highlight-dead-zone: 300 50% 70%; /* Purpleish for dead zones on squares (X marker) */
+    --highlight-creating-dead-zone-pawn-border: 270 50% 50%; /* Darker Purple border for pawns creating dead zones */
     --highlight-win-line: 50 100% 50%; /* Gold for win line */
   }
 
@@ -88,6 +90,7 @@ body {
     --highlight-blocked-pawn: 0 0% 50%;
     --highlight-blocking-pawn-border: 0 70% 50%;
     --highlight-dead-zone: 300 40% 60%;
+    --highlight-creating-dead-zone-pawn-border: 270 40% 40%; 
     --highlight-win-line: 50 90% 55%;
   }
 }

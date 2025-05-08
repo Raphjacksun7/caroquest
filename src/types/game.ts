@@ -12,6 +12,7 @@ export interface BoardSquareData {
   player: Player | null; // Piece on the square (null, 1, or 2)
   isBlocked: boolean;    // This pawn is blocked
   isBlocking: boolean;   // This pawn is part of a blocking formation
+  isCreatingDeadZone: boolean; // This pawn is part of forming a dead zone and cannot be used in a winning line
 }
 
 export type GameBoardArray = BoardSquareData[][];
@@ -31,3 +32,4 @@ export interface DeadZone {
   col: number;
   player: Player; // Player for whom this square is a dead zone (cannot use for winning line)
 }
+

@@ -35,21 +35,24 @@ export const GameBoard = ({
     const currentPlayerRequiredSquareColor = getPlayerSquareColor(currentPlayer);
 
     if (targetBoardSquareColor !== currentPlayerRequiredSquareColor) return false;
-    if (board[row][col].player !== null) return false; // Can't move to occupied square
+    if (board[row][col].player !== null) return false;
 
     if (gamePhase === 'PLACEMENT') {
-      return true; // Valid if empty and correct color
+      // Further restricted zone check is done in the hook, this is for basic UI indication
+      return true; 
     }
     if (gamePhase === 'MOVEMENT' && selectedPawn) {
-      // Any empty square of current player's assigned color is potentially valid for movement destination
-      // The hook's handleSquareClick will do final validation (e.g. if it's the same square)
+      // Cannot select a blocked pawn, that's handled in hook.
+      // If a pawn is selected, any empty square of player's color is a potential target.
       return true;
     }
     return false;
   };
   
-  const isSquareDeadZone = (row: number, col: number): boolean => {
-    return deadZones.some(dz => dz.row === row && dz.col === col);
+  const isSquareDeadZoneForCurrentPlayer = (row: number, col: number): boolean => {
+    // A square is a dead zone for the currentPlayer if it's in deadZones with their player ID.
+    // The 'player' field in DeadZone indicates for whom it's a dead zone.
+    return deadZones.some(dz => dz.row === row && dz.col === col && dz.player === currentPlayer);
   };
 
   return (
@@ -70,7 +73,7 @@ export const GameBoard = ({
             selectedPawn={selectedPawn}
             isWinningSquare={isWinningSquare(rowIndex, colIndex)}
             isValidMove={getIsValidMoveForDisplay(rowIndex, colIndex)}
-            isDeadZone={isSquareDeadZone(rowIndex, colIndex)}
+            isDeadZone={isSquareDeadZoneForCurrentPlayer(rowIndex, colIndex)} // Updated to pass specific check
           />
         ))
       )}
