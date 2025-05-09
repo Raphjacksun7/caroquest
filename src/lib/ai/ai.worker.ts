@@ -1,20 +1,18 @@
-import type { GameState, PlayerId } from '../../lib/gameLogic';
-import { getAIMove } from './ai-config';
-import type { Action } from './mcts';
 
-// This makes sure that all functions from gameLogic are available in the worker scope
-// For a real build system (like Webpack with Next.js), direct imports might work if configured correctly for workers.
-// However, for simplicity and to ensure it works in various environments, explicitly including them or using a bundler is key.
-// For now, we rely on the bundler to make getAIMove and its dependencies available.
+import type { GameState } from '../../lib/gameLogic'; // Ensure this path is correct
+import { getAIMove } from './ai-config';
+import type { Action } from './mcts'; // Assuming Action is exported from mcts.ts
 
 self.onmessage = async (event: MessageEvent<{ gameState: GameState; difficulty: 'easy' | 'medium' | 'hard' }>) => {
   const { gameState, difficulty } = event.data;
   
   try {
+    // gameState needs to be a deep clone if MCTS modifies it, which it does.
+    // The structuredClone in the MCTS constructor should handle this.
     const bestMoveAction = await getAIMove(gameState, difficulty);
     self.postMessage({ type: 'MOVE_CALCULATED', move: bestMoveAction });
   } catch (error) {
-    console.error('AI Worker Error:', error);
+    console.error('AI Worker Error in ai.worker.ts:', error);
     self.postMessage({ type: 'ERROR', error: (error as Error).message });
   }
 };

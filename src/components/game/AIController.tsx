@@ -1,16 +1,19 @@
+
 "use client";
 
 import type { GameState, PlayerId } from '@/lib/gameLogic';
-import type { Action } from '@/lib/ai/mcts'; // Assuming Action is exported from mcts.ts
-import React, { useEffect, useRef } from 'react';
+import type { Action } from '@/lib/ai/mcts';
+import React, { useEffect, useCallback } from 'react';
+import { useAI } from '@/hooks/useAI'; // Assuming useAI is in hooks directory
 
 interface AIControllerProps {
   gameState: GameState;
-  aiPlayerId: PlayerId; // Which player ID is the AI
-  onAIMove: (action: Action) => void;
+  aiPlayerId: PlayerId;
+  onAIMove: (action: Action | null) => void; // Allow null if AI fails or no move
   difficulty: 'easy' | 'medium' | 'hard';
-  isThinking: boolean; // To prevent multiple calls while AI is processing
+  isThinking: boolean;
   setIsThinking: (isThinking: boolean) => void;
+  onAIError?: (errorMsg: string) => void;
 }
 
 export function AIController({ 
@@ -19,56 +22,47 @@ export function AIController({
   onAIMove, 
   difficulty,
   isThinking,
-  setIsThinking
+  setIsThinking,
+  onAIError
 }: AIControllerProps) {
-  const workerRef = useRef<Worker | null>(null);
+  const { calculateBestMove, isLoading: isAILoading, error: aiHookError } = useAI(difficulty);
 
   useEffect(() => {
-    // Initialize the worker
-    // The path assumes ai.worker.ts is processed by the bundler and placed in a suitable public path.
-    // For Next.js, this often means placing the worker file in the `public` directory
-    // and referencing it as `/ai.worker.js` after it's built.
-    // Or, using `new URL('./relative/path/to/ai.worker.ts', import.meta.url)` if your bundler supports it.
-    workerRef.current = new Worker(new URL('../../lib/ai/ai.worker.ts', import.meta.url), { type: 'module' });
+    if (aiHookError && onAIError) {
+      onAIError(aiHookError);
+    }
+  }, [aiHookError, onAIError]);
 
-    workerRef.current.onmessage = (event: MessageEvent<{ type: string, move?: Action, error?: string }>) => {
-      setIsThinking(false);
-      if (event.data.type === 'MOVE_CALCULATED' && event.data.move) {
-        onAIMove(event.data.move);
-      } else if (event.data.type === 'ERROR') {
-        console.error("AI Worker Error:", event.data.error);
-        // Potentially handle AI error, e.g., make a random move or notify user
+  const triggerAIMove = useCallback(async () => {
+    if (isAILoading || isThinking) return;
+
+    setIsThinking(true);
+    try {
+      // Pass a deep clone of the game state to the AI
+      const clonedGameState = structuredClone(gameState);
+      const move = await calculateBestMove(clonedGameState);
+      onAIMove(move);
+    } catch (err) {
+      console.error("Error during AI move calculation:", err);
+      if (onAIError) {
+        onAIError(err instanceof Error ? err.message : String(err));
       }
-    };
-
-    workerRef.current.onerror = (error) => {
-      console.error("AI Worker onerror:", error);
+      onAIMove(null); // Indicate AI failed to move
+    } finally {
       setIsThinking(false);
-      // Handle worker loading errors
-    };
-
-    return () => {
-      workerRef.current?.terminate();
-      workerRef.current = null;
-    };
-  }, [onAIMove, setIsThinking]); // Dependencies for worker setup
+    }
+  }, [gameState, calculateBestMove, isAILoading, isThinking, setIsThinking, onAIMove, onAIError]);
 
   useEffect(() => {
-    // Trigger AI move if it's AI's turn, game is ongoing, and AI is not already thinking
     if (
       gameState.currentPlayerId === aiPlayerId &&
       !gameState.winner &&
-      workerRef.current &&
-      !isThinking
+      !isThinking && // Ensure AI is not already processing
+      !isAILoading // Ensure AI hook/WASM is loaded
     ) {
-      setIsThinking(true);
-      // Send a structured-cloned game state to avoid issues with transferring complex objects
-      workerRef.current.postMessage({
-        gameState: structuredClone(gameState),
-        difficulty,
-      });
+      triggerAIMove();
     }
-  }, [gameState, aiPlayerId, difficulty, workerRef, isThinking, setIsThinking]); // Dependencies for triggering AI
+  }, [gameState.currentPlayerId, gameState.winner, aiPlayerId, isThinking, isAILoading, triggerAIMove]);
 
-  return null; // This component does not render anything
+  return null; 
 }
