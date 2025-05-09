@@ -1,98 +1,127 @@
-
 "use client";
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { GameState } from '@/lib/types'; 
-import type { Action } from '@/lib/ai/mcts';
+import type { GameState } from '@/lib/gameLogic'; 
+import type { Action as AIAction } from '@/lib/ai/mcts'; // Ensure this Action type matches what MCTS worker returns
 
 const workerCache = new Map<string, Worker>();
 
 function createNewAIWorker(): Worker {
-  // Ensure this path correctly points to your bundled worker script
-  return new Worker(new URL('../lib/ai/ai.worker.ts', import.meta.url), { type: 'module' });
+  return new Worker(new URL('/workers/mcts-worker.js', import.meta.url), { type: 'module' });
 }
 
 export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
   const [aiWorker, setAiWorker] = useState<Worker | null>(null);
   const [isLoading, setIsLoading] = useState(true); 
   const [error, setError] = useState<string | null>(null);
-  const currentMovePromiseRef = useRef<{ resolve: (move: Action | null) => void, reject: (error: Error) => void } | null>(null);
+  const currentMovePromiseRef = useRef<{ resolve: (move: AIAction | null) => void, reject: (error: Error) => void } | null>(null);
   
   useEffect(() => {
     setIsLoading(true);
     setError(null);
 
-    let worker = workerCache.get(difficulty);
-    if (!worker) {
-      worker = createNewAIWorker();
-      workerCache.set(difficulty, worker);
+    let workerInstance = workerCache.get(difficulty);
+    if (!workerInstance) {
+      workerInstance = createNewAIWorker();
+      workerCache.set(difficulty, workerInstance);
     }
-    setAiWorker(worker);
-    setIsLoading(false);
-
-    const messageListener = (event: MessageEvent<{ type: string, move?: Action, error?: string }>) => {
+    setAiWorker(workerInstance);
+    
+    const handleMessage = (event: MessageEvent<{ type: string, move?: AIAction, error?: string }>) => {
       if (currentMovePromiseRef.current) {
         if (event.data.type === 'MOVE_CALCULATED' && event.data.move) {
           currentMovePromiseRef.current.resolve(event.data.move);
-        } else if (event.data.type === 'ERROR') {
+        } else if (event.data.type === 'ERROR' && event.data.error) {
           console.error("AI Worker Error from message:", event.data.error);
-          currentMovePromiseRef.current.reject(new Error(event.data.error || 'Unknown AI worker error'));
-        } else { // Handle unexpected message types
+          currentMovePromiseRef.current.reject(new Error(event.data.error));
+        } else if (event.data.type === 'MOVE_CALCULATED' && !event.data.move) { // AI returned null move
+          currentMovePromiseRef.current.resolve(null);
+        }
+         else {
+          console.warn('Unexpected message from AI worker:', event.data);
           currentMovePromiseRef.current.reject(new Error('Unexpected message from AI worker'));
         }
-        currentMovePromiseRef.current = null; // Clear after handling
+        currentMovePromiseRef.current = null;
       }
+      setIsLoading(false); // Worker has responded
     };
 
-    const errorListener = (err: ErrorEvent) => {
+    const handleError = (err: ErrorEvent) => {
       console.error('AI Worker onerror:', err);
-      setError(`AI Worker failed: ${err.message}`);
+      const errorMessage = `AI Worker failed: ${err.message}`;
+      setError(errorMessage);
       setIsLoading(false);
       if (currentMovePromiseRef.current) {
-        currentMovePromiseRef.current.reject(new Error(err.message));
+        currentMovePromiseRef.current.reject(new Error(errorMessage));
         currentMovePromiseRef.current = null;
       }
     };
 
-    worker.addEventListener('message', messageListener);
-    worker.addEventListener('error', errorListener);
+    if (workerInstance) {
+        // Ensure worker is ready before setting isLoading to false
+        // A simple way is to post an init message and wait for ack, or just assume it's ready quickly.
+        // For now, we'll set loading false after a short delay or on first message.
+        // To be more robust, worker could post 'READY' message.
+        setTimeout(() => setIsLoading(false), 100); // Optimistic ready
+
+        workerInstance.addEventListener('message', handleMessage);
+        workerInstance.addEventListener('error', handleError);
+    }
     
     return () => {
-      // Don't terminate cached workers here. Termination could be handled
-      // globally if needed, e.g. when the app unmounts or on page visibility changes.
-      worker?.removeEventListener('message', messageListener);
-      worker?.removeEventListener('error', errorListener);
+      // Don't terminate cached workers here.
+      workerInstance?.removeEventListener('message', handleMessage);
+      workerInstance?.removeEventListener('error', handleError);
+      // If there's an unresolved promise when the component unmounts or difficulty changes, reject it.
+      if (currentMovePromiseRef.current) {
+        currentMovePromiseRef.current.reject(new Error("AI calculation cancelled due to component unmount or difficulty change."));
+        currentMovePromiseRef.current = null;
+      }
     };
-  }, [difficulty]); // Re-setup if difficulty changes to use a different (or new) worker
+  }, [difficulty]);
 
-  const calculateBestMove = useCallback(async (gameState: GameState): Promise<Action | null> => {
+  const calculateBestMove = useCallback(async (gameState: GameState): Promise<AIAction | null> => {
     if (!aiWorker) {
-      console.warn("AI worker not initialized.");
-      setError("AI worker not initialized.");
-      return null;
+      const msg = "AI worker not initialized.";
+      console.warn(msg); setError(msg); return null;
     }
     if (isLoading) {
-      console.warn("AI worker is still loading.");
-      setError("AI worker is still loading.");
-      return null;
+      const msg = "AI worker is still loading/initializing.";
+      console.warn(msg); setError(msg); return null;
     }
-    if (error && !aiWorker) { // If there was a setup error and worker is null
-        console.error("AI worker failed to load previously.");
-        return null;
+    if (error && !aiWorker) {
+      console.error("AI worker failed to load previously."); return null;
     }
     
-    // If there's an ongoing calculation, reject it or wait. For now, let's reject.
     if (currentMovePromiseRef.current) {
-        currentMovePromiseRef.current.reject(new Error("New AI move calculation started before the previous one finished."));
-        currentMovePromiseRef.current = null;
+      currentMovePromiseRef.current.reject(new Error("New AI move calculation started before the previous one finished."));
+      currentMovePromiseRef.current = null;
     }
+    
+    setIsLoading(true); // Set loading true when calculation starts
+    setError(null); // Clear previous errors
 
     return new Promise((resolve, reject) => {
       currentMovePromiseRef.current = { resolve, reject };
-      // Pass a deep clone of gameState to the worker if MCTS modifies it.
-      // The MCTS constructor should handle cloning if necessary.
-      aiWorker.postMessage({ gameState: structuredClone(gameState), difficulty });
+      try {
+        // Ensure the gameState sent to the worker has correctly typed Sets/Maps
+        const stateToSend = {
+          ...gameState,
+          blockedPawnsInfo: Array.from(gameState.blockedPawnsInfo),
+          blockingPawnsInfo: Array.from(gameState.blockingPawnsInfo),
+          deadZoneSquares: Object.fromEntries(gameState.deadZoneSquares),
+          deadZoneCreatorPawnsInfo: Array.from(gameState.deadZoneCreatorPawnsInfo),
+        };
+        aiWorker.postMessage({ gameState: stateToSend, difficulty });
+      } catch (e) {
+        const errMessage = e instanceof Error ? e.message : String(e);
+        console.error("Error posting message to AI worker:", errMessage);
+        setError(errMessage);
+        setIsLoading(false);
+        reject(new Error(errMessage));
+        currentMovePromiseRef.current = null;
+      }
     });
-  }, [aiWorker, isLoading, difficulty, error]); // Add error to dependencies
+  }, [aiWorker, isLoading, difficulty, error]); // error dependency was missing
   
   return {
     calculateBestMove,
@@ -100,4 +129,4 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     error
   };
 }
-
+    

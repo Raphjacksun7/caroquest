@@ -1,10 +1,11 @@
 "use client";
 
-import type { SquareState, GameState } from '@/lib/gameLogic'; // PlayerId removed as not directly used
+import type { SquareState, GameState } from '@/lib/gameLogic';
 import { Pawn } from './Pawn';
 import { cn } from '@/lib/utils';
 import React from 'react';
-import { BOARD_SIZE } from '@/lib/gameLogic';
+// BOARD_SIZE can be imported if needed, but algebraic notation was removed.
+// import { BOARD_SIZE } from '@/lib/gameLogic'; 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface SquareProps {
@@ -25,19 +26,20 @@ export const Square = ({
   onDropOnSquare,
 }: SquareProps) => {
   const { index, row, col, boardColor, pawn, highlight } = squareState;
-  const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, selectedPawnIndex, winningLine } = gameState;
+  const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, winningLine } = gameState;
   const [isDragOver, setIsDragOver] = React.useState(false);
 
-  const deadZoneForPlayerId = deadZoneSquares.get(index);
-  const isDeadZone = deadZoneForPlayerId !== undefined;
-  const isDeadZoneForCurrentPlayer = deadZoneForPlayerId === currentPlayerId;
+  const deadZonePlayerTarget = deadZoneSquares.get(index); // Player for whom this square is a dead zone
+  const isActualDeadZone = deadZonePlayerTarget !== undefined;
+  // A square is a dead zone relevant to the current player if it's a dead zone for them.
+  const isDeadZoneForCurrentPlayer = deadZonePlayerTarget === currentPlayerId;
   
-  const isCurrentPlayerSquare = boardColor === playerColors[currentPlayerId];
+  const isCurrentPlayerSquareColor = boardColor === playerColors[currentPlayerId];
   const isWinningSquare = winningLine?.includes(index) ?? false;
   
   let tooltipContentText = '';
-  if (isDeadZone) {
-    tooltipContentText = `Dead Zone: Player ${deadZoneForPlayerId} cannot use this square in a winning diagonal or place/move pawns here.`;
+  if (isActualDeadZone) {
+    tooltipContentText = `Dead Zone: Player ${deadZonePlayerTarget} cannot use this square for winning or placement.`;
   }
 
   let squareBgClass = boardColor === 'light' 
@@ -59,21 +61,18 @@ export const Square = ({
     squareBgClass = boardColor === 'light' ? 'bg-yellow-200' : 'bg-yellow-600';
   }
 
+
   let cursorClass = 'cursor-default';
   if (!winner) {
-    if (gameState.gamePhase === 'placement' && 
-        !pawn && 
-        isCurrentPlayerSquare && 
-        !isDeadZoneForCurrentPlayer) {
+    if (gameState.gamePhase === 'placement' && !pawn && isCurrentPlayerSquareColor && !isDeadZoneForCurrentPlayer) {
       cursorClass = 'cursor-pointer';
     } else if (gameState.gamePhase === 'movement') {
-      if (pawn && pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
+      if (pawn && pawn.playerId === currentPlayerId && !(gameState.blockedPawnsInfo instanceof Set ? gameState.blockedPawnsInfo.has(index) : false)) {
         cursorClass = 'cursor-grab'; 
-      } else if (!pawn && highlight === 'validMove' && !isDeadZoneForCurrentPlayer) { // Ensure not moving to a dead zone
+      } else if (!pawn && highlight === 'validMove' && !isDeadZoneForCurrentPlayer) {
         cursorClass = 'cursor-pointer'; 
       }
     }
-    
     if (isDeadZoneForCurrentPlayer) {
       cursorClass = 'cursor-not-allowed';
     }
@@ -104,16 +103,16 @@ export const Square = ({
         cursorClass,
         hoverInteractionClasses,
         isDragOver && highlight === 'validMove' && !pawn && 'ring-2 ring-[hsl(var(--highlight-valid-move))]',
-        isDeadZoneForCurrentPlayer && 'opacity-70', // Reduced opacity for current player's dead zones
+        isDeadZoneForCurrentPlayer && 'opacity-70 bg-opacity-80',
       )}
-      aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isDeadZone ? `, Dead Zone for Player ${deadZoneForPlayerId}` : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
-      disabled={!!winner || isDeadZoneForCurrentPlayer} // Disable if it's a dead zone for current player
+      aria-label={`Square ${index}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isActualDeadZone ? `, Dead Zone for Player ${deadZonePlayerTarget}` : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
+      disabled={!!winner || isDeadZoneForCurrentPlayer} // Player cannot interact with their own dead zones
     >
-      {isDeadZone && !pawn && ( 
-        <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-60 text-4xl font-bold pointer-events-none select-none">×</div>
+      {isActualDeadZone && !pawn && ( 
+         <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-60 text-4xl font-bold pointer-events-none select-none">×</div>
       )}
       
-      {highlight === 'validMove' && !pawn && !isDeadZone && ( // Don't show valid move dot if it's a dead zone
+      {highlight === 'validMove' && !pawn && !isActualDeadZone && (
         <div className={cn(
             "absolute w-3 h-3 rounded-full opacity-70 pointer-events-none select-none",
             isDragOver ? "bg-[hsl(var(--foreground))]" : "bg-[hsl(var(--highlight-valid-move))]"
@@ -129,6 +128,7 @@ export const Square = ({
           onPawnDragStart={onPawnDragStart}
         />
       )}
+      {/* Algebraic notation display removed */}
     </button>
   );
 
@@ -139,7 +139,7 @@ export const Square = ({
           <TooltipTrigger asChild>
             {squareButton}
           </TooltipTrigger>
-          <TooltipContent side="top" align="center" className="bg-popover text-popover-foreground rounded-md px-3 py-1.5 text-sm shadow-md z-50">
+          <TooltipContent side="top" align="center" className="bg-popover text-popover-foreground rounded-md px-3 py-1.5 text-sm shadow-md z-50 max-w-xs">
             <p>{tooltipContentText}</p>
           </TooltipContent>
         </Tooltip>
@@ -149,3 +149,4 @@ export const Square = ({
 
   return squareButton;
 };
+    
