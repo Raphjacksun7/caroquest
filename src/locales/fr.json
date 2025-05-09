@@ -1,4 +1,3 @@
-
 {
   "diagonalDomination": "Domination Diagonale",
   "pageDescription": "Un jeu de plateau stratégique d'alignement diagonal et de blocage.",
@@ -141,5 +140,10 @@
   "selectGameMode": "Sélectionnez le Mode de Jeu",
   "chooseHowToPlay": "Choisissez comment vous voulez jouer",
   "playVsAI": "Jouer contre l'IA",
-  "localTwoPlayer": "Deux Joueurs (Local)"
+  "localTwoPlayer": "Deux Joueurs (Local)",
+  "aiErrorTitle": "Erreur IA",
+  "aiDifficulty": "Difficulté de l'IA",
+  "easy": "Facile",
+  "medium": "Moyen",
+  "hard": "Difficile"
 }

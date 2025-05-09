@@ -1,4 +1,3 @@
-
 {
   "diagonalDomination": "Diagonal Domination",
   "pageDescription": "A strategic board game of diagonal alignment and blocking.",
@@ -58,7 +57,7 @@
   "winningPawn": "Winning Pawn",
   "deadZoneSquare": "Dead Zone Square",
   "validMoveSquare": "Valid Move Square",
-  "statusPlayerWins": "Player {{winner}} Wins!",
+  "statusPlayerWins": "{{winner}} Wins!",
   "statusCongratulations": "Congratulations! The game has concluded.",
   "statusPlayerTurn": "Player {{currentPlayerId}}'s Turn ({{playerColorName}})",
   "statusPlayerTurnSimple": "{{playerName}}'s Turn",
@@ -141,5 +140,10 @@
   "selectGameMode": "Select Game Mode",
   "chooseHowToPlay": "Choose how you want to play",
   "playVsAI": "Play vs AI",
-  "localTwoPlayer": "Local Two-Player"
+  "localTwoPlayer": "Local Two-Player",
+  "aiErrorTitle": "AI Error",
+  "aiDifficulty": "AI Difficulty",
+  "easy": "Easy",
+  "medium": "Medium",
+  "hard": "Hard"
 }

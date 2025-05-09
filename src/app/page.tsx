@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -12,9 +11,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Users, Bot, Wifi, Swords, Link as LinkIcon } from 'lucide-react';
+import { Users, Bot, Wifi, Swords, Link as LinkIcon, BarChart } from 'lucide-react';
 
 type GameMode = 'ai' | 'local' | 'remote';
+type AIDifficulty = 'easy' | 'medium' | 'hard';
 
 export default function HomePage() {
   const router = useRouter();
@@ -28,6 +28,7 @@ export default function HomePage() {
   const [remoteGameId, setRemoteGameId] = useState('');
   const [isCreatingOrJoining, setIsCreatingOrJoining] = useState(false);
   const [createdGameId, setCreatedGameId] = useState<string | null>(null);
+  const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>('medium');
 
   useEffect(() => {
     // Persist player name
@@ -65,7 +66,7 @@ export default function HomePage() {
     localStorage.setItem('playerName', playerName1.trim());
 
     if (gameMode === 'ai') {
-      router.push(`/game/ai?playerName=${encodeURIComponent(playerName1.trim())}`);
+      router.push(`/game/ai?playerName=${encodeURIComponent(playerName1.trim())}&difficulty=${aiDifficulty}`);
     } else if (gameMode === 'local') {
       if (!playerName2.trim()) {
         toast({ title: t('errorTitle'), description: t('player2NameRequired'), variant: "destructive" });
@@ -83,17 +84,13 @@ export default function HomePage() {
     }
     localStorage.setItem('playerName', playerName1.trim());
     setIsCreatingOrJoining(true);
-    // Options like isPublic can be passed here if needed later
     createGame(playerName1.trim(), { gameIdToCreate: remoteGameId || undefined }); 
-    // The useEffect for connectedGameId will handle navigation
     if (remoteGameId) setCreatedGameId(remoteGameId.toUpperCase());
-    else setCreatedGameId("...generating..."); // Placeholder until server responds
+    else setCreatedGameId("...generating..."); 
   };
   
-  // Update createdGameId when connectedGameId from the hook changes
   useEffect(() => {
     if (connectedGameId && isCreatingOrJoining && gameMode === 'remote') {
-         // This means a game was successfully created by this client
         if(createdGameId === "...generating..." || createdGameId !== connectedGameId) {
             setCreatedGameId(connectedGameId);
         }
@@ -113,7 +110,6 @@ export default function HomePage() {
     localStorage.setItem('playerName', playerName1.trim());
     setIsCreatingOrJoining(true);
     joinGame(remoteGameId.trim().toUpperCase(), playerName1.trim());
-    // The useEffect for connectedGameId will handle navigation
   };
   
   const generateRandomGameId = () => {
@@ -122,7 +118,7 @@ export default function HomePage() {
 
   const copyGameLink = () => {
     if (!createdGameId) return;
-    const link = `${window.location.origin}/?joinGameId=${createdGameId}`; // Or direct to /game/[id] if preferred
+    const link = `${window.location.origin}/?joinGameId=${createdGameId}`; 
     navigator.clipboard.writeText(link).then(() => {
       toast({ title: t('linkCopiedTitle'), description: t('linkCopiedDescription') });
     }).catch(err => {
@@ -136,13 +132,13 @@ export default function HomePage() {
     if (gameIdFromUrl) {
       setRemoteGameId(gameIdFromUrl);
       setGameMode('remote');
-      // Optionally auto-focus the join button or player name field
     }
   }, []);
 
 
   return (
     <main className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-4 selection:bg-[hsl(var(--primary))] selection:text-[hsl(var(--primary-foreground))]">
+      <Toaster />
       <header className="mb-8 text-center">
         <h1 className="text-5xl font-bold text-[hsl(var(--primary))] tracking-tight">
           {t('diagonalDomination')}
@@ -188,6 +184,26 @@ export default function HomePage() {
               maxLength={20}
             />
           </div>
+
+          {gameMode === 'ai' && (
+            <div className="space-y-3 pt-2 border-t">
+              <Label className="flex items-center gap-2"><BarChart size={18} /> {t('aiDifficulty')}</Label>
+              <RadioGroup value={aiDifficulty} onValueChange={(value) => setAiDifficulty(value as AIDifficulty)}>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="easy" id="diff-easy" />
+                  <Label htmlFor="diff-easy" className="cursor-pointer">{t('easy')}</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="medium" id="diff-medium" />
+                  <Label htmlFor="diff-medium" className="cursor-pointer">{t('medium')}</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="hard" id="diff-hard" />
+                  <Label htmlFor="diff-hard" className="cursor-pointer">{t('hard')}</Label>
+                </div>
+              </RadioGroup>
+            </div>
+          )}
 
           {gameMode === 'local' && (
             <div className="space-y-2">
@@ -245,28 +261,6 @@ export default function HomePage() {
           )}
         </CardContent>
       </Card>
-      <Toaster />
     </main>
   );
 }
-
-// New/Updated Translation Keys:
-// "selectGameMode": "Select Game Mode"
-// "chooseHowToPlay": "Choose how you want to play"
-// "playVsAI": "Play vs AI"
-// "localTwoPlayer": "Local Two-Player"
-// "remoteMultiplayer": "Remote Multiplayer"
-// "yourName": "Your Name"
-// "enterYourName": "Enter your name"
-// "player1Name": "Player 1 Name"
-// "player2Name": "Player 2 Name"
-// "enterPlayer2Name": "Enter Player 2's name"
-// "player2NameRequired": "Player 2 name is required for local multiplayer."
-// "enterGameIdToJoinOrCreate": "Enter Game ID (or leave blank to generate)"
-// "gameIdHintRemote": "Enter an ID to join, or create a new one. Share it with your friend."
-// "creatingGame": "Creating Game..."
-// "startGame": "Start Game"
-// "gameCreatedShareId": "Game created! Share this ID or link with your friend:"
-// "copyGameLink": "Copy Game Link"
-// "failedToCopyLink": "Failed to copy game link."
-// "connectingToServer": "Connecting to server..."

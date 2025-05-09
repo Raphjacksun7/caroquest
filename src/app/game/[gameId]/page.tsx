@@ -1,19 +1,14 @@
-
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
 import type { GameState, PlayerId } from '@/lib/gameLogic';
 import { 
-  BOARD_SIZE, 
-  PAWNS_PER_PLAYER, 
   createInitialGameState,
   placePawn,
   movePawn,
   highlightValidMoves,
   clearHighlights,
-  checkWinCondition, // Ensure this is exported if used directly for local modes
-  updateBlockingStatus, // For local modes
-  updateDeadZones // For local modes
+  PAWNS_PER_PLAYER
 } from '@/lib/gameLogic';
 
 import { GameBoard } from '@/components/game/GameBoard';
@@ -27,12 +22,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog } from '@/components/ui/dialog';
 import { useTranslation } from '@/hooks/useTranslation';
-import { useGameConnection, useGameStore, PlayerInfo } from '@/hooks/useGameConnection';
+import { useGameConnection, PlayerInfo, useGameStore } from '@/hooks/useGameConnection'; // Added useGameStore
 import { useAI } from '@/hooks/useAI';
 import { WaitingRoom } from '@/components/game/WaitingRoom';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 type GameMode = 'ai' | 'local' | 'remote';
+type AIDifficulty = 'easy' | 'medium' | 'hard';
 
 export default function GamePage() {
   const params = useParams();
@@ -45,7 +41,6 @@ export default function GamePage() {
   const [player1NameLocal, setPlayer1NameLocal] = useState('Player 1');
   const [player2NameLocal, setPlayer2NameLocal] = useState('Player 2');
   
-  // For remote games via useGameConnection
   const {
     gameState: remoteGameState,
     localPlayerId: remoteLocalPlayerId,
@@ -64,17 +59,21 @@ export default function GamePage() {
   const [isRulesDialogOpen, setIsRulesDialogOpen] = useState(false);
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { calculateBestMove, isLoading: isAILoading, error: aiError } = useAI('medium');
 
-  // Determine game mode and initialize local state if needed
+  const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>('medium');
+  const { calculateBestMove, isLoading: isAILoading, error: aiError } = useAI(aiDifficulty);
+
+
   useEffect(() => {
     const mode = gameIdFromRoute === 'ai' ? 'ai' : gameIdFromRoute === 'local' ? 'local' : 'remote';
     setGameMode(mode);
 
     if (mode === 'ai') {
       const p1Name = searchParams.get('playerName') || 'Player';
+      const difficulty = searchParams.get('difficulty') as AIDifficulty || 'medium';
       setPlayer1NameLocal(p1Name);
-      setPlayer2NameLocal('AI Opponent');
+      setPlayer2NameLocal(t('aiOpponent'));
+      setAiDifficulty(difficulty);
       setLocalGameState(createInitialGameState());
     } else if (mode === 'local') {
       const p1Name = searchParams.get('player1') || 'Player 1';
@@ -82,14 +81,13 @@ export default function GamePage() {
       setPlayer1NameLocal(p1Name);
       setPlayer2NameLocal(p2Name);
       setLocalGameState(createInitialGameState());
-    } else { // Remote mode
-      // Handled by useGameConnection's useEffect
+    } else { 
       const playerName = localStorage.getItem('playerName') || `Player_${Math.random().toString(36).substring(2, 7)}`;
-      if (!connectedGameId && gameIdFromRoute && isConnected) {
+      if (!connectedGameId && gameIdFromRoute && isConnected) { // isConnected check ensures socket is ready
          joinGame(gameIdFromRoute, playerName);
       }
     }
-  }, [gameIdFromRoute, searchParams, joinGame, connectedGameId, isConnected]);
+  }, [gameIdFromRoute, searchParams, joinGame, connectedGameId, t, isConnected]);
 
 
   const activeGameState = gameMode === 'remote' ? remoteGameState : localGameState;
@@ -99,8 +97,6 @@ export default function GamePage() {
       { id: 'local2', name: player2NameLocal, playerId: 2 as PlayerId}
     ] : []);
 
-
-  // AI Move Logic for 'ai' mode
   useEffect(() => {
     if (gameMode === 'ai' && localGameState && localGameState.currentPlayerId === 2 && !localGameState.winner && !isAILoading && !aiError) {
       const makeAIMove = async () => {
@@ -115,24 +111,23 @@ export default function GamePage() {
           if (nextState) setLocalGameState(nextState);
           else console.error("AI made an invalid move:", aiMove);
         } else if (aiError) {
-            toast({ title: "AI Error", description: aiError, variant: "destructive"});
+            toast({ title: t('aiErrorTitle'), description: aiError, variant: "destructive"});
         }
       };
       const timeoutId = setTimeout(makeAIMove, 500);
       return () => clearTimeout(timeoutId);
     }
-  }, [gameMode, localGameState, calculateBestMove, isAILoading, aiError, toast]);
+  }, [gameMode, localGameState, calculateBestMove, isAILoading, aiError, toast, t]);
 
   useEffect(() => {
     if (gameConnectionError) {
       toast({ title: t('errorTitle'), description: gameConnectionError, variant: "destructive", duration: 5000 });
-      clearError();
+      clearError(); // Make sure clearError is called
     }
   }, [gameConnectionError, toast, t, clearError]);
 
   useEffect(() => {
     document.title = t('diagonalDomination');
-    // ... other meta updates
   }, [t]);
 
   useEffect(() => {
@@ -146,7 +141,6 @@ export default function GamePage() {
   const handleLocalSquareClick = useCallback((index: number) => {
     if (!localGameState || localGameState.winner) return;
 
-    // For local mode, allow clicks for current player. AI turn is handled by useEffect.
     if (gameMode === 'ai' && localGameState.currentPlayerId === 2) {
       toast({ title: t('AIsTurn'), description: t('waitForAIMove')});
       return;
@@ -158,7 +152,7 @@ export default function GamePage() {
       const newState = placePawn(localGameState, index);
       if (newState) setLocalGameState(newState);
       else toast({ title: t('invalidPlacement'), description: t('invalidPlacementDescription'), variant: "destructive" });
-    } else { // Movement phase
+    } else { 
       if (localGameState.selectedPawnIndex === null) {
         if (square.pawn && square.pawn.playerId === localGameState.currentPlayerId && !localGameState.blockedPawnsInfo.has(index)) {
           setLocalGameState(highlightValidMoves(localGameState, index));
@@ -166,16 +160,15 @@ export default function GamePage() {
           toast({ title: t('pawnBlocked'), description: t('pawnBlockedDescription'), variant: "destructive" });
         }
       } else {
-        if (localGameState.selectedPawnIndex === index) { // Deselect
+        if (localGameState.selectedPawnIndex === index) { 
           setLocalGameState(clearHighlights(localGameState));
         } else {
           const targetSquare = localGameState.board[index];
           if (targetSquare.highlight === 'validMove') {
             const newState = movePawn(localGameState, localGameState.selectedPawnIndex, index);
             if (newState) setLocalGameState(newState);
-            // else toast for invalid move if needed, though highlight should prevent this
           } else if (square.pawn && square.pawn.playerId === localGameState.currentPlayerId && !localGameState.blockedPawnsInfo.has(index)) {
-             setLocalGameState(highlightValidMoves(localGameState, index)); // Select another of own pawns
+             setLocalGameState(highlightValidMoves(localGameState, index));
           } else {
              setLocalGameState(clearHighlights(localGameState));
           }
@@ -199,14 +192,13 @@ export default function GamePage() {
     } else { 
       if (remoteGameState.selectedPawnIndex === null) { 
         if (square.pawn && square.pawn.playerId === remoteLocalPlayerId && !remoteGameState.blockedPawnsInfo.has(index)) {
-          // Client-side highlight for responsiveness, server will confirm and send definitive state
           const tempState = highlightValidMoves(remoteGameState, index);
-          useGameStore.getState().setGameState(tempState); // Update Zustand store directly
+          useGameStore.getState().setGameState(tempState); 
         } else if (square.pawn && square.pawn.playerId === remoteLocalPlayerId && remoteGameState.blockedPawnsInfo.has(index)) {
           toast({ title: t('pawnBlocked'), description: t('pawnBlockedDescription'), variant: "destructive" });
         }
       } else { 
-        if (remoteGameState.selectedPawnIndex === index) { // Deselect
+        if (remoteGameState.selectedPawnIndex === index) { 
             const tempState = clearHighlights(remoteGameState);
             useGameStore.getState().setGameState(tempState);
         } else {
@@ -230,11 +222,8 @@ export default function GamePage() {
 
   const resetGameHandler = useCallback(() => {
     if (gameMode === 'remote') {
-      // For multiplayer, this should ideally be a server-side reset or rematch request.
-      // For now, client might just navigate away or show "waiting for server reset"
-      // TODO: Implement server-side reset/rematch for remote games
       toast({ title: t('gameReset'), description: t('featureNotAvailableRemote')});
-    } else { // Local or AI mode
+    } else { 
       setLocalGameState(createInitialGameState());
       toast({ title: t('gameReset'), description: t('gameResetDescription')});
     }
@@ -254,9 +243,11 @@ export default function GamePage() {
 
   const handlePawnDrop = useCallback((targetIndex: number) => {
     if (!activeGameState || !activeLocalPlayerId || activeGameState.selectedPawnIndex === null) {
-      const clearedState = clearHighlights(activeGameState);
-      if (gameMode === 'remote') useGameStore.getState().setGameState(clearedState);
-      else setLocalGameState(clearedState);
+      if(activeGameState) { // Check if activeGameState is not null
+        const clearedState = clearHighlights(activeGameState);
+        if (gameMode === 'remote') useGameStore.getState().setGameState(clearedState);
+        else setLocalGameState(clearedState);
+      }
       return;
     }
 
@@ -270,7 +261,7 @@ export default function GamePage() {
         }
     } else {
         toast({ title: t('invalidDrop'), description: t('invalidDropDescription'), variant: "destructive" });
-        const clearedState = clearHighlights(activeGameState); // Clear highlights on invalid drop
+        const clearedState = clearHighlights(activeGameState); 
         if (gameMode === 'remote') useGameStore.getState().setGameState(clearedState);
         else setLocalGameState(clearedState);
     }
@@ -328,13 +319,13 @@ export default function GamePage() {
               <PlayerCard
                 playerId={1}
                 playerName={player1DisplayName}
-                isLocalPlayer={gameMode === 'remote' ? remoteLocalPlayerId === 1 : true} // P1 is always local in local/AI
+                isLocalPlayer={gameMode === 'remote' ? remoteLocalPlayerId === 1 : true}
                 gameState={activeGameState}
               />
               <PlayerCard
                 playerId={2}
                 playerName={player2DisplayName}
-                isLocalPlayer={gameMode === 'remote' ? remoteLocalPlayerId === 2 : false} // P2 is opponent in local/AI from P1 perspective
+                isLocalPlayer={gameMode === 'remote' ? remoteLocalPlayerId === 2 : false}
                 gameState={activeGameState}
               />
             </div>
@@ -372,21 +363,3 @@ export default function GamePage() {
     </>
   );
 }
-
-// New translation key
-// "featureNotAvailableRemote": "This feature is not available for remote games yet."
-// "player2NameRequired": "Player 2 name is required for local multiplayer."
-// "aiOpponent": "AI Opponent" (used in page.tsx too)
-// "gameModeLocal": "Local Two-Player"
-// "gameModeAI": "Player vs AI"
-// "gameModeRemote": "Remote Multiplayer"
-// "yourName": "Your Name"
-// "player1Name": "Player 1 Name"
-// "player2Name": "Player 2 Name"
-// "enterPlayer2Name": "Enter Player 2's name"
-// "enterGameIdToJoinOrCreate": "Enter Game ID (or leave blank to generate)"
-// "gameIdHintRemote": "Enter an ID to join, or create a new one. Share it with your friend."
-// "creatingGame": "Creating Game..."
-// "startGame": "Start Game"
-// "gameCreatedShareId": "Game created! Share this ID or link with your friend:"
-// "copyGameLink": "Copy Game Link"
