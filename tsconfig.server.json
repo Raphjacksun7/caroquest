@@ -1,0 +1,15 @@
+
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "outDir": "dist",
+    "target": "es2017",
+    "isolatedModules": false,
+    "noEmit": false,
+    "esModuleInterop": true, // Added for compatibility with commonjs modules like express
+    "resolveJsonModule": true // If you plan to import JSON files
+  },
+  "include": ["server.ts", "src/lib/socketHandler.ts", "src/lib/gameLogic.ts", "src/types/**/*.ts"],
+  "exclude": ["node_modules", "src/app", "src/components", "src/hooks", "src/locales"]
+}

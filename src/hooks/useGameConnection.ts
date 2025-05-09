@@ -1,10 +1,9 @@
 
 "use client";
-import type { ReactNode } from 'react';
 import { useEffect, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { GameState, PlayerId } from '@/lib/gameLogic'; // Ensure correct path
-import type { PlayerInfo } from '@/types/socket'; // Define this type
+import type { GameState, PlayerId } from '@/lib/gameLogic';
+import type { PlayerInfo } from '@/types/socket';
 
 export interface UseGameConnectionReturn {
   gameState: GameState | null;
@@ -30,20 +29,27 @@ export function useGameConnection(): UseGameConnectionReturn {
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
 
   useEffect(() => {
-    const socketInstance = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001');
+    // Determine socket URL based on environment
+    // For integrated server, it's the same origin.
+    const socketUrl = typeof window !== 'undefined' ? window.location.origin : (process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:9002');
+    
+    const socketInstance = io(socketUrl, {
+      // Recommended to use WebSocket transport primarily
+      transports: ['websocket'],
+    });
     setSocket(socketInstance);
 
     socketInstance.on('connect', () => {
       setIsConnected(true);
-      console.log('Connected to socket server');
+      console.log('Connected to socket server at:', socketUrl);
     });
 
-    socketInstance.on('game_created', (data: { gameId: string; playerId: PlayerId; gameState: GameState }) => {
+    socketInstance.on('game_created', (data: { gameId: string; playerId: PlayerId; gameState: GameState; players: PlayerInfo[] }) => {
       console.log('Game created:', data);
       setCurrentGameId(data.gameId);
       setLocalPlayerId(data.playerId);
       setGameState(data.gameState);
-      // Assuming players info might come with game_created or game_joined
+      setPlayers(data.players);
     });
 
     socketInstance.on('game_joined', (data: { gameId: string; playerId: PlayerId; gameState: GameState; players: PlayerInfo[] }) => {
@@ -56,13 +62,14 @@ export function useGameConnection(): UseGameConnectionReturn {
     
     socketInstance.on('opponent_joined', (data: { opponentName: string, opponentPlayerId: PlayerId, players: PlayerInfo[] }) => {
       console.log('Opponent joined:', data);
-      setPlayers(data.players); // Update player list
-      // Potentially update GameState if needed, or trigger a toast
+      setPlayers(data.players);
+      // Optionally show a toast: `${data.opponentName} has joined!`
     });
     
-    socketInstance.on('opponent_rejoined', (data: { opponentName: string }) => {
-        console.log('Opponent rejoined:', data);
-        // Could show a toast message
+    socketInstance.on('opponent_rejoined', (data: { opponentName: string, players: PlayerInfo[] }) => {
+        console.log('Opponent re-joined:', data);
+        setPlayers(data.players);
+        // Optionally show a toast: `${data.opponentName} has re-joined!`
     });
 
     socketInstance.on('game_start', (data: { gameState: GameState, players: PlayerInfo[] }) => {
@@ -72,26 +79,21 @@ export function useGameConnection(): UseGameConnectionReturn {
     });
 
     socketInstance.on('game_updated', (data: { gameState: GameState }) => {
-      console.log('Game updated');
       setGameState(data.gameState);
     });
 
     socketInstance.on('game_over', (data: { winner: PlayerId, winningLine: number[] | null }) => {
       console.log('Game over:', data);
-      if (gameState) {
-        setGameState({ ...gameState, winner: data.winner, winningLine: data.winningLine });
+      if (gameState) { // Ensure gameState is not null before spreading
+        setGameState(prevGameState => prevGameState ? { ...prevGameState, winner: data.winner, winningLine: data.winningLine } : null);
       }
-      // Consider showing a winner dialog or toast
     });
     
     socketInstance.on('player_left', (data: { playerName: string, playerId: PlayerId, remainingPlayers: PlayerInfo[] }) => {
         console.log('Player left:', data);
         setPlayers(data.remainingPlayers);
-        // Potentially end game or show message
         if (data.remainingPlayers.length < 2 && gameState && !gameState.winner) {
-            // Example: if a player leaves and the game wasn't over, the remaining player might win by default
-            // This logic depends on game rules for abandonment
-            // setGameState(prev => prev ? {...prev, winner: data.remainingPlayers[0]?.playerId} : null);
+            // Handle game ending if one player leaves
         }
     });
 
@@ -100,30 +102,37 @@ export function useGameConnection(): UseGameConnectionReturn {
       setError(data.message);
     });
 
-    socketInstance.on('disconnect', () => {
+    socketInstance.on('disconnect', (reason) => {
       setIsConnected(false);
-      console.log('Disconnected from socket server');
-      // Optionally reset game state or show a disconnected message
-      // setError("Disconnected. Please refresh or try again.");
-      // setGameState(null); 
-      // setLocalPlayerId(null);
-      // setPlayers([]);
+      console.log('Disconnected from socket server:', reason);
+      // setError("Disconnected from server. Please try refreshing.");
     });
+    
+    socketInstance.on('connect_error', (err) => {
+      console.error('Connection Error:', err.message);
+      setError(`Failed to connect to server: ${err.message}. Ensure the server is running and accessible.`);
+      setIsConnected(false);
+    });
+
 
     return () => {
       socketInstance.disconnect();
     };
-  }, []); // Removed gameState from dependencies to avoid re-running on every gameState change from server
+  }, []); // GameState removed from deps
 
   const createGame = useCallback((playerName: string, gameId: string) => {
     if (socket && isConnected) {
       socket.emit('create_game', { playerName, gameId });
+    } else {
+      setError("Not connected to server. Cannot create game.");
     }
   }, [socket, isConnected]);
 
   const joinGame = useCallback((playerName: string, gameId: string) => {
     if (socket && isConnected) {
       socket.emit('join_game', { playerName, gameId });
+    } else {
+      setError("Not connected to server. Cannot join game.");
     }
   }, [socket, isConnected]);
 
