@@ -5,6 +5,7 @@ import { Pawn } from './Pawn';
 import { cn } from '@/lib/utils';
 import React from 'react';
 import { BOARD_SIZE } from '@/config/game';
+import { getSquareColorType } from '@/lib/gameUtils'; // Import the missing function
 
 interface SquareProps {
   row: number;
@@ -62,7 +63,7 @@ export const Square = ({
   // Cursor logic
   let cursorClass = 'cursor-default';
   if (!winner) {
-    if (gamePhase === 'PLACEMENT' && player === null && getBoardSquareColorType(row, col) === (currentPlayer === 1 ? 'light' : 'dark')) {
+    if (gamePhase === 'PLACEMENT' && player === null && getSquareColorType(row, col) === (currentPlayer === 1 ? 'light' : 'dark')) {
       cursorClass = 'cursor-pointer';
     } else if (gamePhase === 'MOVEMENT') {
       if (player === currentPlayer && !isBlocked) {
