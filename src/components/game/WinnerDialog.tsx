@@ -1,12 +1,14 @@
 
-import type { Player } from '@/types/game';
+"use client";
+
+import type { PlayerId } from '@/lib/gameLogic';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card'; // Card can be used inside Dialog for styling
+import { Card } from '@/components/ui/card'; 
 import { Award } from 'lucide-react';
 
 interface WinnerDialogProps {
-  winner: Player | null;
+  winner: PlayerId | null;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onPlayAgain: () => void;
@@ -31,7 +33,6 @@ export const WinnerDialog = ({ winner, isOpen, onOpenChange, onPlayAgain }: Winn
                 Congratulations on your strategic victory!
                 </DialogDescription>
             </DialogHeader>
-            {/* Optional: CardContent for more details if needed */}
             <DialogFooter className="p-6 pt-4 bg-muted/50 rounded-b-lg">
                 <Button onClick={() => { onPlayAgain(); onOpenChange(false); }} className="w-full" size="lg">
                     Play Again

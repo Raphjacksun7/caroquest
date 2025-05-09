@@ -1,53 +1,125 @@
+
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import type { GameState, PlayerId, SquareState, Pawn as PawnType } from '@/lib/gameLogic'; 
+import { 
+  createInitialGameState, 
+  placePawnAction, 
+  movePawnAction, 
+  highlightValidMoves, 
+  clearHighlights,
+  BOARD_SIZE,
+  PAWNS_PER_PLAYER
+} from '@/lib/gameLogic';
+
 import { GameBoard } from '@/components/game/GameBoard';
 import { PlayerCard } from '@/components/game/PlayerCard';
 import { ControlsCard } from '@/components/game/ControlsCard';
 import { HistoryCard } from '@/components/game/HistoryCard';
-import { StatusDisplay } from '@/components/game/StatusDisplay';
-import { RulesDialogContent } from '@/components/game/RulesDialog';
+import { RulesDialogContent } from '@/components/game/RulesDialog'; 
 import { WinnerDialog } from '@/components/game/WinnerDialog';
-import { useDiagonalDomination } from '@/hooks/useDiagonalDomination';
-import { Toaster } from "@/components/ui/toaster";
+import { StatusDisplay } from '@/components/game/StatusDisplay';
+import { Toaster, toast } from "@/components/ui/toaster";
 import { Dialog } from '@/components/ui/dialog';
-import { DndProvider } from 'react-dnd'; // If using react-dnd
-import { HTML5Backend } from 'react-dnd-html5-backend'; // If using react-dnd
+
 
 export default function DiagonalDominationPage() {
-  const {
-    board,
-    currentPlayer,
-    gamePhase,
-    pawnsPlaced,
-    selectedPawn,
-    winner,
-    winningLine,
-    handleSquareClick,
-    resetGame,
-    pawnsPerPlayer,
-    changePawnsPerPlayerCount,
-    deadZones,
-    gameHistory,
-    validMoves,
-    handlePawnDragStart,
-    handlePawnDrop,
-  } = useDiagonalDomination();
-
+  const [gameState, setGameState] = useState<GameState>(createInitialGameState());
   const [isRulesDialogOpen, setIsRulesDialogOpen] = useState(false);
   const [isWinnerDialogOpen, setIsWinnerDialogOpen] = useState(false);
-
+  
   useEffect(() => {
-    if (winner) {
+    if (gameState.winner) {
       setIsWinnerDialogOpen(true);
+      toast({
+        title: `Player ${gameState.winner} Wins!`,
+        description: "Congratulations on your strategic victory!",
+        duration: 5000,
+      });
     } else {
       setIsWinnerDialogOpen(false);
     }
-  }, [winner]);
+  }, [gameState.winner]);
 
-  // For HTML5 Drag and Drop, context is implicit. For react-dnd, wrap with DndProvider.
-  // We will use HTML5 Drag and Drop API first.
+  const handleSquareClick = useCallback((index: number) => {
+    const { gamePhase, currentPlayerId, selectedPawnIndex, winner } = gameState;
 
+    if (winner) return;
+
+    let newGameState: GameState | null = null;
+
+    if (gamePhase === 'placement') {
+      newGameState = placePawnAction(gameState, index);
+      if (!newGameState) {
+        toast({ title: "Invalid Placement", description: "Cannot place pawn here. Check rules.", variant: "destructive" });
+      }
+    } else { // movement phase
+      if (selectedPawnIndex === null) {
+        const square = gameState.board[index];
+        if (square.pawn && square.pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
+          newGameState = highlightValidMoves(gameState, index);
+        } else if (square.pawn && square.pawn.playerId === currentPlayerId && gameState.blockedPawnsInfo.has(index)) {
+          toast({ title: "Pawn Blocked", description: "This pawn is blocked and cannot move.", variant: "destructive" });
+        }
+      } else {
+        if (selectedPawnIndex === index) { // Clicked on already selected pawn
+             newGameState = clearHighlights(gameState); // Deselect
+        } else {
+            newGameState = movePawnAction(gameState, selectedPawnIndex, index);
+            if (!newGameState) {
+                 // If move is invalid, but clicked on another of player's own non-blocked pawns, select that one
+                const clickedSquare = gameState.board[index];
+                if (clickedSquare.pawn && clickedSquare.pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
+                    newGameState = highlightValidMoves(gameState, index);
+                } else {
+                    toast({ title: "Invalid Move", description: "Cannot move pawn there.", variant: "destructive" });
+                    newGameState = clearHighlights(gameState); // Clear selection on invalid move to other square
+                }
+            }
+        }
+      }
+    }
+
+    if (newGameState) {
+      setGameState(newGameState);
+    }
+  }, [gameState]);
+
+  const resetGameHandler = useCallback(() => {
+    setGameState(createInitialGameState());
+    setIsWinnerDialogOpen(false);
+    toast({ title: "Game Reset", description: "A new game has started."});
+  }, []);
+
+  const handlePawnDragStart = (pawnIndex: number) => {
+    const { gamePhase, currentPlayerId, winner, board, blockedPawnsInfo } = gameState;
+    if (winner || gamePhase !== 'movement') return;
+
+    const pawnSquare = board[pawnIndex];
+    if (pawnSquare.pawn && pawnSquare.pawn.playerId === currentPlayerId && !blockedPawnsInfo.has(pawnSquare.index)) {
+      setGameState(highlightValidMoves(gameState, pawnIndex));
+    }
+  };
+
+  const handlePawnDrop = (targetIndex: number) => {
+    const { selectedPawnIndex, winner } = gameState;
+    if (winner || selectedPawnIndex === null) {
+      // If drop is not valid or no pawn selected, clear highlights
+      setGameState(clearHighlights(gameState));
+      return;
+    }
+
+    const newGameState = movePawnAction(gameState, selectedPawnIndex, targetIndex);
+    if (newGameState) {
+      setGameState(newGameState);
+    } else {
+      toast({ title: "Invalid Move", description: "Cannot drop pawn there.", variant: "destructive" });
+      // Clear highlights if drop was invalid
+      setGameState(clearHighlights(gameState));
+    }
+  };
+  
   return (
     <>
       <main className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-2 sm:p-4 selection:bg-[hsl(var(--primary))] selection:text-[hsl(var(--primary-foreground))]">
@@ -59,57 +131,43 @@ export default function DiagonalDominationPage() {
           </header>
           
           <StatusDisplay
-              gamePhase={gamePhase}
-              currentPlayer={currentPlayer}
-              winner={winner}
-              selectedPawn={selectedPawn}
+            gamePhase={gameState.gamePhase}
+            currentPlayerId={gameState.currentPlayerId}
+            winner={gameState.winner}
+            selectedPawnIndex={gameState.selectedPawnIndex}
+            board={gameState.board}
            />
 
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,_1fr)_auto_minmax(280px,_1fr)] gap-4 sm:gap-6 items-start mt-4">
-            {/* Left Column */}
             <div className="space-y-4 sm:space-y-6 lg:sticky lg:top-6">
               <ControlsCard
-                pawnsPerPlayer={pawnsPerPlayer}
-                onPawnsChange={changePawnsPerPlayerCount}
-                onReset={resetGame}
+                onReset={resetGameHandler}
                 onOpenRules={() => setIsRulesDialogOpen(true)}
+                pawnsPerPlayer={PAWNS_PER_PLAYER} // This is now a constant from gameLogic
+                onPawnsChange={() => {}} // Pawns per player is not changeable in this logic
+                isGameActive={!gameState.winner}
               />
               <PlayerCard
-                player={1}
-                pawnsPlaced={pawnsPlaced[1]}
-                maxPawns={pawnsPerPlayer}
-                isCurrentPlayer={currentPlayer === 1 && !winner}
-                winner={winner}
+                playerId={1}
+                gameState={gameState}
               />
               <PlayerCard
-                player={2}
-                pawnsPlaced={pawnsPlaced[2]}
-                maxPawns={pawnsPerPlayer}
-                isCurrentPlayer={currentPlayer === 2 && !winner}
-                winner={winner}
+                playerId={2}
+                gameState={gameState}
               />
             </div>
 
-            {/* Center Column - Game Board */}
             <div className="flex flex-col items-center justify-center">
               <GameBoard
-                board={board}
-                currentPlayer={currentPlayer}
-                gamePhase={gamePhase}
-                selectedPawn={selectedPawn}
-                winningLine={winningLine}
-                deadZones={deadZones}
-                validMoves={validMoves}
+                gameState={gameState}
                 onSquareClick={handleSquareClick}
-                winner={winner}
                 onPawnDragStart={handlePawnDragStart}
                 onPawnDrop={handlePawnDrop}
               />
             </div>
 
-            {/* Right Column */}
             <div className="space-y-4 sm:space-y-6 lg:sticky lg:top-6">
-              <HistoryCard gameHistory={gameHistory} />
+               <HistoryCard gameState={gameState} />
             </div>
           </div>
         </div>
@@ -117,14 +175,14 @@ export default function DiagonalDominationPage() {
       <Toaster />
       
       <Dialog open={isRulesDialogOpen} onOpenChange={setIsRulesDialogOpen}>
-        <RulesDialogContent pawnsPerPlayer={pawnsPerPlayer} />
+        <RulesDialogContent pawnsPerPlayer={PAWNS_PER_PLAYER}/>
       </Dialog>
 
       <WinnerDialog 
-        winner={winner}
+        winner={gameState.winner}
         isOpen={isWinnerDialogOpen}
         onOpenChange={setIsWinnerDialogOpen}
-        onPlayAgain={resetGame}
+        onPlayAgain={resetGameHandler}
       />
     </>
   );

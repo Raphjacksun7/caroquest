@@ -1,82 +1,70 @@
+
 "use client";
 
-import type { Player, SquareColorType, BoardSquareData, GamePhase } from '@/types/game';
+import type { SquareState, GameState, PlayerId } from '@/lib/gameLogic';
 import { Pawn } from './Pawn';
 import { cn } from '@/lib/utils';
 import React from 'react';
-import { BOARD_SIZE } from '@/config/game';
-import { getSquareColorType } from '@/lib/gameUtils'; // Import the missing function
+import { BOARD_SIZE } from '@/lib/gameLogic'; 
 
 interface SquareProps {
-  row: number;
-  col: number;
-  squareData: BoardSquareData;
-  squareColorType: SquareColorType;
-  isSelectedPawn: boolean;
-  isValidMove: boolean;
-  isDeadZoneForCurrentPlayer: boolean;
-  currentPlayer: Player;
-  gamePhase: GamePhase;
-  winner: Player | null;
-  onClick: (row: number, col: number) => void;
-  onPawnDragStart: (row: number, col: number) => void;
+  squareState: SquareState;
+  gameState: GameState;
+  onClick: () => void;
+  onPawnDragStart: (pawnIndex: number) => void;
   onDragOverSquare: (e: React.DragEvent<HTMLDivElement>) => void;
   onDropOnSquare: (e: React.DragEvent<HTMLDivElement>) => void;
 }
 
 export const Square = ({
-  row,
-  col,
-  squareData,
-  squareColorType,
-  isSelectedPawn,
-  isValidMove,
-  isDeadZoneForCurrentPlayer,
-  currentPlayer,
-  gamePhase,
-  winner,
+  squareState,
+  gameState,
   onClick,
   onPawnDragStart,
   onDragOverSquare,
   onDropOnSquare,
 }: SquareProps) => {
-  const { player, isBlocked, isPartOfWinningLine } = squareData;
+  const { index, row, col, boardColor, pawn, highlight } = squareState;
+  const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, selectedPawnIndex } = gameState;
   const [isDragOver, setIsDragOver] = React.useState(false);
-  
-  const squareBgColor = squareColorType === 'light' 
+
+  const isDeadZoneForCurrentPlayer = deadZoneSquares.get(index) === currentPlayerId;
+
+  let squareBgClass = boardColor === 'light' 
     ? 'bg-[hsl(var(--board-light-square))]' 
     : 'bg-[hsl(var(--board-dark-square))]';
-
-  let conditionalClasses = '';
-  let hoverInteractionClasses = 'group-hover/board:opacity-90'; // Default hover for board context
-
-  if (isPartOfWinningLine) {
-    conditionalClasses = `bg-[hsl(var(--highlight-win-line))] ${squareColorType === 'light' ? 'bg-opacity-70' : 'bg-opacity-60'}`;
-  } else if (isSelectedPawn && player === currentPlayer) { // Pawn on this square is selected
-    conditionalClasses = 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))] z-10';
-  } else if (isValidMove && player === null) { // Empty square that is a valid move target
-    conditionalClasses = 'bg-opacity-70'; // Valid move dot will provide main visual
-    hoverInteractionClasses = 'hover:bg-opacity-80'; // Hover on valid move target
-    if(isDragOver) conditionalClasses += ' bg-[hsl(var(--highlight-valid-move))] opacity-90'; // Highlight when dragging over valid target
-  }
   
-  // Cursor logic
+  let conditionalClasses = '';
+  let hoverInteractionClasses = 'group-hover/board:opacity-90';
+
+  if (highlight === 'winningSquare') {
+     squareBgClass = `bg-[hsl(var(--highlight-win-line))] ${boardColor === 'light' ? 'bg-opacity-70' : 'bg-opacity-60'}`;
+  } else if (highlight === 'selectedPawn') {
+    conditionalClasses = 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))] z-10';
+  } else if (highlight === 'validMove') {
+    squareBgClass = boardColor === 'light' ? 'bg-green-200' : 'bg-green-700'; // Using Tailwind classes for valid moves
+    hoverInteractionClasses = 'hover:bg-opacity-80';
+     if(isDragOver) squareBgClass = boardColor === 'light' ? 'bg-green-300' : 'bg-green-800';
+  } else if (lastMove?.to === index || lastMove?.from === index) {
+    squareBgClass = boardColor === 'light' ? 'bg-yellow-200' : 'bg-yellow-600'; // Using Tailwind for last move
+  }
+
+
   let cursorClass = 'cursor-default';
   if (!winner) {
-    if (gamePhase === 'PLACEMENT' && player === null && getSquareColorType(row, col) === (currentPlayer === 1 ? 'light' : 'dark')) {
+    if (gameState.gamePhase === 'placement' && !pawn && boardColor === playerColors[currentPlayerId]) {
       cursorClass = 'cursor-pointer';
-    } else if (gamePhase === 'MOVEMENT') {
-      if (player === currentPlayer && !isBlocked) {
-        cursorClass = 'cursor-grab'; // For draggable pawns
-      } else if (player === null && isValidMove) {
-        cursorClass = 'cursor-pointer'; // For empty valid move squares
+    } else if (gameState.gamePhase === 'movement') {
+      if (pawn && pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
+        cursorClass = 'cursor-grab'; 
+      } else if (!pawn && highlight === 'validMove') {
+        cursorClass = 'cursor-pointer'; 
       }
     }
   }
-
-
+  
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
-    if (isValidMove && player === null) { // Only set for valid drop targets
+    if (highlight === 'validMove' && !pawn) { 
       setIsDragOver(true);
     }
   };
@@ -84,47 +72,42 @@ export const Square = ({
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     setIsDragOver(false);
   };
-
+  
   return (
     <button
-      id={`square-${row}-${col}`}
-      onClick={() => onClick(row, col)}
+      id={`square-${index}`}
+      onClick={onClick}
       onDragOver={onDragOverSquare}
       onDrop={onDropOnSquare}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       className={cn(
         'w-14 h-14 md:w-[calc(3.75rem-2px)] md:h-[calc(3.75rem-2px)] flex items-center justify-center border border-[hsla(var(--foreground),0.1)] transition-all duration-150 relative overflow-hidden focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))] group/square',
-        squareBgColor,
+        squareBgClass,
         conditionalClasses,
         cursorClass,
         hoverInteractionClasses,
-        isDragOver && isValidMove && player === null && 'ring-2 ring-[hsl(var(--highlight-valid-move))]', // Visual cue for drag over valid target
+        isDragOver && highlight === 'validMove' && !pawn && 'ring-2 ring-[hsl(var(--highlight-valid-move))]',
       )}
-      aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${squareColorType}, ${player ? `Player ${player} piece` : 'Empty'}${isBlocked ? ', Blocked' : ''}${isDeadZoneForCurrentPlayer ? ', Dead Zone for you' : ''}${isSelectedPawn && player === currentPlayer ? ', Selected' : ''}${isValidMove ? ', Valid Move' : ''}`}
-      disabled={!!winner && player !== null && player !== currentPlayer && !isSelectedPawn} // More nuanced disabling
+      aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isDeadZoneForCurrentPlayer ? ', Dead Zone for you' : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
+      disabled={!!winner && (!pawn || pawn.playerId !== currentPlayerId) && highlight !== 'selectedPawn'}
     >
-      {isDeadZoneForCurrentPlayer && player === null && ( 
+      {isDeadZoneForCurrentPlayer && !pawn && ( 
          <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-50 text-4xl font-bold pointer-events-none select-none">×</div>
       )}
-      {isValidMove && player === null && !isDeadZoneForCurrentPlayer && (
+      {highlight === 'validMove' && !pawn && !isDeadZoneForCurrentPlayer && (
         <div className={cn(
             "absolute w-3 h-3 rounded-full opacity-70 pointer-events-none select-none",
-            isDragOver ? "bg-[hsl(var(--foreground))]" : "bg-[hsl(var(--highlight-valid-move))]" // Change dot color on drag over
+            isDragOver ? "bg-[hsl(var(--foreground))]" : "bg-[hsl(var(--highlight-valid-move))]"
             )} 
         />
       )}
-      {player && (
+      {pawn && (
         <Pawn
-          player={player}
-          row={row}
-          col={col}
-          squareData={squareData}
-          isSelected={isSelectedPawn && squareData.player === currentPlayer}
-          isCurrentPlayerPawn={player === currentPlayer}
-          gamePhase={gamePhase}
-          hasWinner={!!winner}
-          onDragStartPawn={onPawnDragStart}
+          pawn={pawn}
+          squareIndex={index}
+          gameState={gameState}
+          onPawnDragStart={onPawnDragStart}
         />
       )}
       <div className="absolute bottom-0 right-1 text-[0.6rem] md:text-xs opacity-60 pointer-events-none select-none font-mono">
