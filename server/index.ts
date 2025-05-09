@@ -27,9 +27,30 @@ interface GameRoom {
 const app = express();
 const httpServer = createServer(app);
 
+const allowedOrigins: string[] = [];
+if (process.env.NODE_ENV === 'development') {
+  allowedOrigins.push('http://localhost:9002'); // Default Next.js dev port
+  allowedOrigins.push('http://127.0.0.1:9002');
+}
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
+} else {
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn("WARN: FRONTEND_URL environment variable is not set. CORS might block connections from your cloud IDE's public URL. Consider setting it in your .env file.");
+  }
+}
+
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:9002", // Ensure this matches your Next.js dev port
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.error(`CORS Error: Origin ${origin} not allowed. Allowed origins: ${allowedOrigins.join(', ')}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST"]
   }
 });
@@ -53,7 +74,7 @@ io.on('connection', (socket: ServerSocket) => {
     };
     games.set(requestedGameId, newGame);
     socket.join(requestedGameId);
-    socket.emit('game_created', { gameId: newGame.gameId, playerId: 1, gameState: newGame.state });
+    socket.emit('game_created', { gameId: newGame.gameId, playerId: 1, gameState: newGame.state, players: newGame.players });
     console.log(`Game created: ${requestedGameId} by ${playerName} (Player 1)`);
   });
 
@@ -90,7 +111,7 @@ io.on('connection', (socket: ServerSocket) => {
     // Notify other player
     const otherPlayer = game.players.find(p => p.id !== socket.id);
     if (otherPlayer) {
-      socket.to(otherPlayer.id).emit('opponent_joined', { opponentName: playerName, opponentPlayerId: newPlayerId, players: game.players });
+      io.to(otherPlayer.id).emit('opponent_joined', { opponentName: playerName, opponentPlayerId: newPlayerId, players: game.players });
     }
     console.log(`${playerName} (Player ${newPlayerId}) joined game: ${gameId}`);
 
@@ -151,9 +172,12 @@ io.on('connection', (socket: ServerSocket) => {
       if (playerIndex !== -1) {
         const disconnectedPlayer = game.players.splice(playerIndex, 1)[0];
         console.log(`${disconnectedPlayer.name} left game ${gameId}`);
-        io.to(gameId).emit('player_left', { playerName: disconnectedPlayer.name, playerId: disconnectedPlayer.playerId, remainingPlayers: game.players });
+        // Notify remaining player(s)
+        if (game.players.length > 0) {
+            io.to(gameId).emit('player_left', { playerName: disconnectedPlayer.name, playerId: disconnectedPlayer.playerId, remainingPlayers: game.players });
+        }
         
-        // Optional: If all players leave, delete the game room
+        // If all players leave or conditions for game closure met, delete the game room
         if (game.players.length === 0) {
           games.delete(gameId);
           console.log(`Game room ${gameId} closed.`);
@@ -166,4 +190,9 @@ io.on('connection', (socket: ServerSocket) => {
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`Socket.IO server running on port ${PORT}`);
+  if (allowedOrigins.length === 0) {
+    console.warn("WARN: No allowed origins configured for CORS. This might be an issue in production if FRONTEND_URL is not set.");
+  } else {
+    console.log("Allowed CORS origins:", allowedOrigins.join(', '));
+  }
 });
