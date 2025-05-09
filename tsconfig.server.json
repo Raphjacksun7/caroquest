@@ -18,8 +18,8 @@
     "src/lib/gameStore.ts",
     "src/lib/matchmaking.ts",
     "src/lib/serialization.ts",
-    "src/lib/generated/**/*.ts", // Include generated FlatBuffers stubs
+    "src/lib/generated/**/*.ts",
     "src/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "src/app", "src/components", "src/hooks", "src/locales", "public/workers"]
+  "exclude": ["node_modules", "src/app", "src/components", "src/hooks", "src/locales", "public/workers", "src/lib/clientUtils.ts"]
 }

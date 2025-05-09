@@ -6,7 +6,7 @@ import type { GameState, SquareState, Pawn, PlayerId } from './types';
 
 // Alias for generated types
 const GameStateBuffer = GameStateNS.GameStateBuffer;
-const FBSquareBuffer = SquareNS.SquareBuffer; // Renamed to avoid conflict with SquareState
+const FBSquareBuffer = SquareNS.SquareBuffer; 
 const FBPawnBuffer = SquareNS.PawnBuffer;
 const FBSquareColor = SquareNS.SquareColor;
 const FBGamePhase = GameStateNS.GamePhase;
@@ -35,7 +35,7 @@ export function serializeGameState(gameState: GameState): Uint8Array {
       FBSquareBuffer.addPawn(builder, pawnOffset);
     }
     
-    let highlightValue = 0; // 0 for none
+    let highlightValue = 0; 
     if (square.highlight) {
       switch (square.highlight) {
         case 'selectedPawn': highlightValue = 1; break;
@@ -71,7 +71,8 @@ export function serializeGameState(gameState: GameState): Uint8Array {
     GameStateBuffer.addLastMoveTo(builder, gameState.lastMove.to);
   }
   
-  GameStateBuffer.addSeqId(builder, BigInt(Date.now())); // Using timestamp as seqId for simplicity
+  // Add sequence ID and timestamp
+  GameStateBuffer.addSeqId(builder, BigInt(Date.now())); // Using timestamp as a simple seqId
   GameStateBuffer.addTimestamp(builder, BigInt(Date.now()));
   
   const gameStateOffset = GameStateBuffer.endGameStateBuffer(builder);
@@ -92,7 +93,7 @@ export function deserializeGameState(data: Uint8Array): GameState {
     const fbPawn = squareBuf.pawn();
     if (fbPawn) {
       pawn = {
-        id: fbPawn.id() || `p${fbPawn.playerId()}_${i}`, // Fallback id
+        id: fbPawn.id() || `p${fbPawn.playerId()}_${i}`,
         playerId: fbPawn.playerId() as PlayerId,
         color: fbPawn.color() === FBSquareColor.Light ? 'light' : 'dark'
       };
@@ -123,10 +124,12 @@ export function deserializeGameState(data: Uint8Array): GameState {
   const lastMoveTo = gameStateBuf.lastMoveTo();
   const lastMoveFrom = gameStateBuf.lastMoveFrom();
 
+  // For Sets and Maps, they need to be recalculated or transmitted if essential for client logic
+  // For now, initializing as empty, client-side logic will re-populate them if using full gameLogic.
   return {
     board,
     currentPlayerId: gameStateBuf.currentPlayerId() as PlayerId,
-    playerColors: { 1: 'light', 2: 'dark'}, // This should ideally come from gameState or be reconstructed
+    playerColors: { 1: 'light', 2: 'dark'}, // Assuming standard assignment
     gamePhase: gameStateBuf.gamePhase() === FBGamePhase.Placement ? 'placement' : 'movement',
     pawnsToPlace: {
       1: gameStateBuf.pawnsToPlacePlayer1(),
@@ -136,14 +139,14 @@ export function deserializeGameState(data: Uint8Array): GameState {
       1: gameStateBuf.pawnsPlacedPlayer1(),
       2: gameStateBuf.pawnsPlacedPlayer2()
     },
-    selectedPawnIndex: selectedPawnIndex === -1 ? null : selectedPawnIndex,
+    selectedPawnIndex: selectedPawnIndex === -1 || selectedPawnIndex === 0 && gameStateBuf.selectedPawnIndex() === -1 ? null : selectedPawnIndex, // Handle default -1
     blockedPawnsInfo: new Set<number>(), 
     blockingPawnsInfo: new Set<number>(),
     deadZoneSquares: new Map<number, PlayerId>(),
     deadZoneCreatorPawnsInfo: new Set<number>(),
     winner: winner === 0 ? null : winner as PlayerId,
-    lastMove: lastMoveTo === -1 ? null : {
-      from: lastMoveFrom === -1 ? null : lastMoveFrom,
+    lastMove: lastMoveTo === -1 || (lastMoveTo === 0 && gameStateBuf.lastMoveTo() === -1) ? null : {
+      from: lastMoveFrom === -1 || (lastMoveFrom === 0 && gameStateBuf.lastMoveFrom() === -1) ? null : lastMoveFrom,
       to: lastMoveTo
     },
     winningLine: null, 
@@ -159,14 +162,14 @@ export function createDeltaUpdate(
   if (previousState.currentPlayerId !== currentState.currentPlayerId) {
     updates.push({
       type: 'player_turn',
-      changes: { currentPlayerId: currentState.currentPlayerId }
+      changes: { playerId: currentState.currentPlayerId }
     });
   }
   
   if (previousState.gamePhase !== currentState.gamePhase) {
     updates.push({
       type: 'game_phase',
-      changes: { gamePhase: currentState.gamePhase }
+      changes: { phase: currentState.gamePhase }
     });
   }
   
@@ -180,11 +183,13 @@ export function createDeltaUpdate(
     const prevHighlight = prevSquare.highlight;
     const currHighlight = currSquare.highlight;
 
-    if (prevPawnId !== currPawnId || prevHighlight !== currHighlight) {
+    if (prevPawnId !== currPawnId || 
+        prevSquare.pawn?.playerId !== currSquare.pawn?.playerId || // Check player ID change too
+        prevHighlight !== currHighlight) {
       boardChanges.push({
         index: i,
         pawn: currSquare.pawn,
-        highlight: currSquare.highlight
+        highlight: currSquare.highlight 
       });
     }
   }
@@ -201,18 +206,24 @@ export function createDeltaUpdate(
       type: 'game_over',
       changes: { 
         winner: currentState.winner,
-        winningLine: currentState.winningLine // Assuming winningLine is populated in currentState
+        winningLine: currentState.winningLine 
       }
     });
   }
 
-  // Add other state changes if necessary (e.g., pawnsToPlace, selectedPawnIndex)
-  if(previousState.pawnsToPlace[1] !== currentState.pawnsToPlace[1] || previousState.pawnsToPlace[2] !== currentState.pawnsToPlace[2]) {
+  if(JSON.stringify(previousState.pawnsToPlace) !== JSON.stringify(currentState.pawnsToPlace)) {
     updates.push({ type: 'pawns_to_place_update', changes: currentState.pawnsToPlace });
+  }
+  if(JSON.stringify(previousState.placedPawns) !== JSON.stringify(currentState.placedPawns)) {
+    updates.push({ type: 'placed_pawns_update', changes: currentState.placedPawns });
   }
   if(previousState.selectedPawnIndex !== currentState.selectedPawnIndex) {
     updates.push({ type: 'selection_update', changes: { selectedPawnIndex: currentState.selectedPawnIndex } });
   }
+  if (previousState.lastMove?.to !== currentState.lastMove?.to || previousState.lastMove?.from !== currentState.lastMove?.from) {
+     updates.push({ type: 'last_move_update', changes: currentState.lastMove });
+  }
+
 
   return updates;
 }

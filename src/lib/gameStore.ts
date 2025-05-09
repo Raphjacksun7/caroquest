@@ -1,11 +1,11 @@
 
 import type { Redis } from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
-import type { GameState, PlayerId } from './types'; // Ensure PlayerId is imported if used for assignedPlayerId
+import type { GameState, PlayerId } from './types'; 
 import { createInitialGameState } from './gameLogic';
 import LZString from 'lz-string';
 
-// Define a structure for Player in the store if it differs from socket PlayerInfo
+// Define a structure for Player in the store
 interface StoredPlayer {
   id: string; // socket id
   name: string;
@@ -16,7 +16,7 @@ interface GameData {
   state: GameState;
   players: StoredPlayer[];
   lastActivity: number;
-  options: any;
+  options: any; // To store options like isPublic
   sequenceId: number;
 }
 
@@ -28,23 +28,23 @@ export class GameStore {
     this.redis = redisClient;
   }
   
-  async createGame(creatorId: string, creatorName: string, options: any = {}): Promise<string> {
+  async createGame(creatorSocketId: string, creatorName: string, options: any = {}): Promise<string> {
     const gameId = uuidv4().substring(0, 8);
     const initialState = createInitialGameState();
     
     const gameData: GameData = {
       id: gameId,
       state: initialState,
-      players: [{ id: creatorId, name: creatorName, playerId: 1 as PlayerId }],
+      players: [{ id: creatorSocketId, name: creatorName, playerId: 1 as PlayerId }],
       lastActivity: Date.now(),
-      options,
+      options, // Store provided options
       sequenceId: 0
     };
     
     const compressedData = LZString.compressToUTF16(JSON.stringify(gameData));
     await this.redis.set(`game:${gameId}`, compressedData);
-    await this.redis.expire(`game:${gameId}`, 30 * 60); // 30 minutes
-    
+    await this.redis.expire(`game:${gameId}`, 30 * 60); // 30 minutes TTL
+
     if (options.isPublic) {
       await this.redis.zadd('public_games', Date.now(), gameId);
     }
@@ -62,7 +62,12 @@ export class GameStore {
         console.error('Failed to decompress game data for gameId:', gameId);
         return null;
       }
-      const gameData = JSON.parse(gameDataString);
+      const gameData = JSON.parse(gameDataString) as GameData;
+      // Ensure sets and maps are correctly rehydrated if not done in deserializeGameState
+      gameData.state.blockedPawnsInfo = new Set(gameData.state.blockedPawnsInfo);
+      gameData.state.blockingPawnsInfo = new Set(gameData.state.blockingPawnsInfo);
+      gameData.state.deadZoneSquares = new Map(Object.entries(gameData.state.deadZoneSquares).map(([k,v]) => [parseInt(k), v as PlayerId]));
+      gameData.state.deadZoneCreatorPawnsInfo = new Set(gameData.state.deadZoneCreatorPawnsInfo);
       return gameData;
     } catch (error) {
       console.error('Error parsing game data for gameId:', gameId, error);
@@ -76,11 +81,11 @@ export class GameStore {
     
     game.state = state;
     game.lastActivity = Date.now();
-    game.sequenceId++;
+    game.sequenceId++; // Increment sequence ID on each state update
     
     const compressedData = LZString.compressToUTF16(JSON.stringify(game));
     await this.redis.set(`game:${gameId}`, compressedData);
-    await this.redis.expire(`game:${gameId}`, 30 * 60);
+    await this.redis.expire(`game:${gameId}`, 30 * 60); // Refresh TTL
     
     return true;
   }
@@ -93,10 +98,9 @@ export class GameStore {
       return { success: false }; // Game is full
     }
     
-    // Second player is always PlayerId 2
-    const assignedPlayerId = 2 as PlayerId;
+    const assignedPlayerId = 2 as PlayerId; // Second player is always PlayerId 2
     game.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId });
-    game.lastActivity = Date.now(); // Update activity on player join
+    game.lastActivity = Date.now();
     
     const compressedData = LZString.compressToUTF16(JSON.stringify(game));
     await this.redis.set(`game:${gameId}`, compressedData);
@@ -110,25 +114,25 @@ export class GameStore {
   }
   
   async getPublicGames(limit = 10): Promise<any[]> {
-    const gameIds = await this.redis.zrevrange('public_games', 0, limit - 1);
+    const gameIds = await this.redis.zrevrange('public_games', 0, limit - 1); // Get newest games
     
-    const gamesPromises = gameIds.map(gameId => this.getGame(gameId));
+    const gamesPromises = gameIds.map(id => this.getGame(id));
     const resolvedGames = await Promise.all(gamesPromises);
 
     return resolvedGames
       .filter(game => game !== null)
-      .map(game => ({
+      .map(game => ({ // Return summarized info for public listing
         id: game!.id,
         createdBy: game!.players[0]?.name || 'Unknown',
-        playerCount: game!.players.length,
-        created: game!.lastActivity, // Using lastActivity as creation/update timestamp
+        playerCount: game!.players.length, // Add player count
+        created: game!.lastActivity, 
         options: game!.options
       }));
   }
   
   async deleteGame(gameId: string): Promise<void> {
     await this.redis.del(`game:${gameId}`);
-    await this.redis.zrem('public_games', gameId);
+    await this.redis.zrem('public_games', gameId); // Also remove from public list
   }
 
   async removePlayerFromGame(gameId: string, socketId: string): Promise<StoredPlayer | null> {
@@ -144,8 +148,8 @@ export class GameStore {
     if (game.players.length === 0) {
       await this.deleteGame(gameId);
     } else {
-      // If the game was public and now has one player, re-add to public games if applicable
       if (game.options.isPublic && game.players.length === 1) {
+        // If game becomes public again with one player
         await this.redis.zadd('public_games', Date.now(), gameId);
       }
       const compressedData = LZString.compressToUTF16(JSON.stringify(game));

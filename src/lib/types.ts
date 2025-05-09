@@ -29,12 +29,11 @@ export interface GameState {
   blockedPawnsInfo: Set<number>;
   blockingPawnsInfo: Set<number>;
   deadZoneSquares: Map<number, PlayerId>; 
-  deadZoneCreatorPawnsInfo: Set<number>; 
+  deadZoneCreatorPawnsInfo: Set<number>; // Ensured this matches gameLogic
   winner: PlayerId | null;
   lastMove: { from: number | null, to: number } | null; 
   winningLine: number[] | null; 
-  // Sequence ID for client-side prediction and server reconciliation (optional for now)
-  // seqId?: number; 
-  // Timestamp for server state (optional for now)
-  // timestamp?: number; 
+  // highlightedValidMoves is not part of the core GameState from gameLogic.ts
+  // It's a UI-derived state, so it should be handled client-side if needed
+  // or passed around with gameState if essential for server processing (unlikely for this)
 }

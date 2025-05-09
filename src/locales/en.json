@@ -77,11 +77,16 @@
   "rulesBlockingDescription2": "A blocked pawn (visibly dimmed or marked) cannot be used in a winning diagonal.",
   "rulesBlockingDescription3": "Pawns actively blocking (visibly marked, e.g., thicker border) cannot be used in a winning diagonal.",
   "rulesBlockingDescription4": "Restricted Placement: During placement, you cannot place a pawn in an empty square if it's already \"sandwiched\" by two of your opponent's pawns (e.g., OpponentPawn - YourEmptySquare - OpponentPawn).",
-  "rulesBlockingDescription5": "Dead Zones: If you have two pawns on your color separated by one empty square of your player's assigned color (YourPawn - EmptySquareOfYourColor - YourPawn) horizontally or vertically, that empty square becomes a \"dead zone\" (marked with '×') for the opponent. They cannot use it in their winning diagonal.",
+  "rulesBlockingDescription5": "Dead Zones: If you have two pawns on your color separated by one empty square of your player's assigned color (YourPawn - EmptySquareOfYourColor - YourPawn) horizontally or vertically, that empty square becomes a \"dead zone\" (marked with '×') for the opponent. They cannot use it in their winning diagonal or place pawns there.",
   "rulesBlockingDescription6": "Pawns creating a dead zone (visibly marked, e.g., different border) cannot be used in a winning diagonal.",
   "rulesWinningDescription": "Be the first to align 4 of your pawns diagonally. Pawns must be on your assigned color and not involved in blocking/creating dead zones, nor can the line pass through an opponent's dead zone.",
   "connectingToServer": "Connecting to server...",
   "loadingGameDetails": "Loading game details...",
+  "joiningGame": "Joining game",
+  "AIsTurn": "AI's Turn",
+  "waitForAIMove": "Please wait for the AI to move.",
+  "singlePlayerMode": "Single Player Mode",
+  "multiplayerMode": "Multiplayer Mode",
   "joinOrCreateGame": "Join or Create Game",
   "enterDetailsToPlay": "Enter your name and a game ID to start playing.",
   "playerNameLabel": "Your Name",
@@ -114,5 +119,6 @@
   "searchingForOpponent": "Searching for an opponent...",
   "cancelMatchmaking": "Cancel Matchmaking",
   "connectionFailed": "Connection Failed",
-  "retryConnection": "Retry Connection"
+  "retryConnection": "Retry Connection",
+  "loadingGame": "Loading game state..."
 }

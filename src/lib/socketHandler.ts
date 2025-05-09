@@ -4,26 +4,26 @@ import type { Redis } from 'ioredis';
 import type { GameStore } from './gameStore';
 import { 
   serializeGameState, 
-  // deserializeGameState, // Deserialization happens on client
+  // deserializeGameState, // Not needed on server side for emits
   createDeltaUpdate
 } from './serialization';
 import { 
   placePawn, 
-  movePawn,
-  createInitialGameState
+  movePawn, 
+  createInitialGameState // Used if game state corrupts or for new games
 } from './gameLogic';
 import type { GameState, PlayerId } from './types';
-import type { PlayerInfo } from '@/types/socket'; // For player info structure used in game state
+import type { PlayerInfo } from '@/types/socket'; 
 import LZString from 'lz-string';
 
 const RATE_LIMIT = {
-  maxRequests: 20, // Increased slightly
-  timeWindow: 1000 // 1 second
+  maxRequests: 20, 
+  timeWindow: 1000 
 };
 
 const MOVE_TIMING = {
-  minTimeBetweenMoves: 100, // Reduced for responsiveness
-  maxTimeVariance: 1000 // Increased tolerance for client/server time diff
+  minTimeBetweenMoves: 100, 
+  maxTimeVariance: 1000 
 };
 
 interface RateLimitInfo {
@@ -33,8 +33,7 @@ interface RateLimitInfo {
 
 export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis: Redis) {
   const rateLimits = new Map<string, RateLimitInfo>();
-  // Store previous game states per gameId to calculate deltas
-  const previousStates = new Map<string, GameState>();
+  const previousStates = new Map<string, GameState>(); // For delta updates
 
   io.use((socket, next) => {
     const clientIp = (socket.handshake.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || socket.handshake.address;
@@ -61,6 +60,10 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
     console.log('New connection:', socket.id);
     let currentJoinedGameId: string | null = null;
 
+    socket.on('ping_time', () => {
+      socket.emit('pong_time', Date.now());
+    });
+
     socket.on('create_game', async ({ playerName, options = {} }: {playerName: string, options?: any}) => {
       try {
         if (!playerName || typeof playerName !== 'string' || playerName.length > 30) {
@@ -69,7 +72,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
         }
         
         const gameId = await gameStore.createGame(socket.id, playerName, options);
-        const game = await gameStore.getGame(gameId); // game will contain initial state
+        const game = await gameStore.getGame(gameId);
         
         if (!game) {
           socket.emit('game_error', { message: 'Failed to create game internal error.' });
@@ -81,14 +84,13 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
         previousStates.set(gameId, game.state);
         
         const binaryState = serializeGameState(game.state);
-        // Socket.IO v3+ handles binary data (Uint8Array) directly with default parser.
-        // No need for LZString compression here if perMessageDeflate is enabled on server.
+        const compressedState = LZString.compressToUint8Array(binaryState);
         
         socket.emit('game_created', { 
           gameId, 
           playerId: 1 as PlayerId, 
-          gameState: binaryState, // Send binary
-          players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})),
+          gameState: compressedState,
+          players: game.players.map((p: any) => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})), // Ensure PlayerInfo structure
           timestamp: Date.now()
         });
         
@@ -112,25 +114,27 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
           return;
         }
         
-        // Check if player is rejoining
-        const existingPlayer = game.players.find(p => p.name === playerName);
+        const existingPlayer = game.players.find((p: any) => p.name === playerName);
         if (existingPlayer) {
-            existingPlayer.id = socket.id; // Update socket ID
-            // Re-save game with updated socket ID (GameStore might need updatePlayerSocket method)
-            // For now, just rejoin the socket room
+            existingPlayer.id = socket.id; 
+            // TODO: GameStore needs a method to update player socket ID or resave game.
+            // For now, just rejoin the socket room if player details match.
+            await gameStore.updateGameState(gameId, game.state); // Resave to update activity and potentially player list if it changes
             socket.join(gameId);
             currentJoinedGameId = gameId;
             if (!previousStates.has(gameId)) previousStates.set(gameId, game.state);
 
             const binaryState = serializeGameState(game.state);
+            const compressedState = LZString.compressToUint8Array(binaryState);
             socket.emit('game_joined', { 
               gameId, 
               playerId: existingPlayer.playerId, 
-              gameState: binaryState,
-              players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})),
+              gameState: compressedState,
+              players: game.players.map((p: any) => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})),
+              opponent: game.players.find((p:any) => p.id !== socket.id)?.name || null,
               timestamp: Date.now()
             });
-             socket.to(gameId).emit('opponent_rejoined', { playerName: existingPlayer.name, players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})) });
+             socket.to(gameId).emit('opponent_rejoined', { playerName: existingPlayer.name, players: game.players.map((p:any) => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})) });
             console.log(`${existingPlayer.name} re-joined game: ${gameId}`);
             return;
         }
@@ -143,14 +147,14 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
         
         const result = await gameStore.addPlayerToGame(gameId, socket.id, playerName);
         
-        if (!result.success || !result.assignedPlayerId) {
+        if (!result.success || result.assignedPlayerId === undefined) { // Check for assignedPlayerId
           socket.emit('game_error', { message: 'Failed to join game. Room might be full or an error occurred.' });
           return;
         }
         
         socket.join(gameId);
         currentJoinedGameId = gameId;
-        const updatedGame = await gameStore.getGame(gameId); // Get updated game data
+        const updatedGame = await gameStore.getGame(gameId);
         if (!updatedGame) {
              socket.emit('game_error', { message: 'Failed to retrieve game after join.' });
              return;
@@ -158,25 +162,28 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
         previousStates.set(gameId, updatedGame.state);
         
         const binaryState = serializeGameState(updatedGame.state);
+        const compressedState = LZString.compressToUint8Array(binaryState);
         
         socket.emit('game_joined', { 
           gameId, 
           playerId: result.assignedPlayerId, 
-          gameState: binaryState,
-          players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})),
+          gameState: compressedState,
+          players: updatedGame.players.map((p: any) => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})),
+          opponent: updatedGame.players.find((p:any) => p.id !== socket.id)?.name || null,
           timestamp: Date.now()
         });
         
-        io.to(gameId).emit('opponent_joined', { // Notify all in room, including new player
+        io.to(gameId).emit('opponent_joined', { 
             opponentName: playerName, 
             opponentPlayerId: result.assignedPlayerId,
-            players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})) 
+            players: updatedGame.players.map((p: any) => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})) ,
+            timestamp: Date.now()
         });
         
         if (updatedGame.players.length === 2) {
             io.to(gameId).emit('game_start', { 
-                gameState: binaryState, // Send initial state for game start
-                players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})),
+                gameState: compressedState, 
+                players: updatedGame.players.map((p: any) => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})),
                 timestamp: Date.now() 
             });
             console.log(`Game started: ${gameId}`);
@@ -210,7 +217,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
             socket.emit('game_error', { message: 'Game not found.' }); return;
           }
 
-          const player = game.players.find((p: PlayerInfo) => p.id === socket.id);
+          const player = game.players.find((p: any) => p.id === socket.id); // Use PlayerInfo type
           if (!player || player.playerId !== game.state.currentPlayerId) {
             socket.emit('game_error', { message: 'Not your turn or not in game.' }); return;
           }
@@ -228,19 +235,31 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
           
           await gameStore.updateGameState(gameId, newState);
           
-          // Instead of delta, let's send full state for now, client can optimize rendering
-          // const deltaUpdates = createDeltaUpdate(previousStates.get(gameId)!, newState);
-          previousStates.set(gameId, newState); // Update stored previous state
+          const prevState = previousStates.get(gameId);
+          const deltaUpdates = prevState ? createDeltaUpdate(prevState, newState) : [];
+          previousStates.set(gameId, newState);
           
-          const binaryState = serializeGameState(newState);
-          io.to(gameId).emit('game_updated', { 
-            gameState: binaryState,
-            timestamp: Date.now(),
-            // fullUpdate: true // Indicate it's a full state for client
-          });
+          const shouldSendFullState = game.sequenceId % 10 === 0 || deltaUpdates.length === 0 || deltaUpdates.length > 5; // Send full state if no delta or many changes
+
+          if (shouldSendFullState) {
+            const binaryState = serializeGameState(newState);
+            const compressedState = LZString.compressToUint8Array(binaryState);
+            io.to(gameId).emit('game_updated', { 
+              gameState: compressedState,
+              timestamp: Date.now(),
+              fullUpdate: true 
+            });
+          } else {
+            io.to(gameId).emit('game_delta', { 
+              updates: deltaUpdates,
+              seqId: game.sequenceId, // Use updated sequenceId from gameStore
+              timestamp: Date.now()
+            });
+          }
 
           if (newState.winner) {
-            io.to(gameId).emit('game_over', { winner: newState.winner, winningLine: newState.winningLine });
+            // No need to send separate game_over if full state includes winner
+            // io.to(gameId).emit('game_over', { winner: newState.winner, winningLine: newState.winningLine, timestamp: Date.now() });
           }
 
         } catch (error) {
@@ -252,6 +271,19 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
     socket.on('place_pawn', (data) => handlePlayerAction('place_pawn', data.gameId, data));
     socket.on('move_pawn', (data) => handlePlayerAction('move_pawn', data.gameId, data));
 
+    socket.on('request_full_state', async ({ gameId }: { gameId: string}) => {
+        const game = await gameStore.getGame(gameId);
+        if (game) {
+            const binaryState = serializeGameState(game.state);
+            const compressedState = LZString.compressToUint8Array(binaryState);
+            socket.emit('game_updated', { 
+                gameState: compressedState, 
+                timestamp: Date.now(),
+                fullUpdate: true
+            });
+        }
+    });
+
     socket.on('disconnect', async () => {
       console.log('Player disconnected:', socket.id);
       if (currentJoinedGameId) {
@@ -259,39 +291,37 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
           const removedPlayer = await gameStore.removePlayerFromGame(currentJoinedGameId, socket.id);
           if (removedPlayer) {
             const game = await gameStore.getGame(currentJoinedGameId);
-            const remainingPlayers = game ? game.players.map((p: PlayerInfo) => ({id: p.id, name: p.name, playerId: p.playerId})) : [];
+            const remainingPlayers = game ? game.players.map((p: any) => ({id: p.id, name: p.name, playerId: p.playerId as PlayerId})) : [];
             
             io.to(currentJoinedGameId).emit('opponent_disconnected', {
               playerName: removedPlayer.name,
               playerId: removedPlayer.playerId,
-              remainingPlayers
+              remainingPlayers,
+              timestamp: Date.now()
             });
             console.log(`Player ${removedPlayer.name} left game ${currentJoinedGameId}`);
-
-            if (game && game.players.length < 2 && !game.state.winner) {
-                 // Could emit a game_paused or similar event
-            }
           }
           previousStates.delete(currentJoinedGameId);
         } catch (error) {
           console.error('Error handling disconnection:', error);
         }
       }
-      // Also remove from matchmaking if they were in queue
-      await removeFromMatchmakingQueue(socket.id, redis);
+      await redis.zrem('matchmaking_queue', socket.id);
+      await redis.del(`player:${socket.id}`);
     });
 
-    socket.on('join_matchmaking', async ({ playerName, rating }: {playerName: string, rating: number}) => {
+    socket.on('join_matchmaking', async ({ playerName, rating }: {playerName: string, rating?: number}) => {
       try {
         if (!playerName || typeof playerName !== 'string' || playerName.length > 30) {
           socket.emit('game_error', { message: 'Invalid player name for matchmaking.' });
           return;
         }
-        await addToMatchmakingQueue(socket.id, playerName, rating, redis);
-        const queueSize = await redis.zcard('matchmaking_queue');
+        await redis.zadd('matchmaking_queue', rating || 1000, socket.id);
+        await redis.set(`player:${socket.id}`, JSON.stringify({ id: socket.id, name: playerName, rating: rating || 1000, joinTime: Date.now() }));
+        
         socket.emit('matchmaking_joined', {
           message: 'Added to matchmaking queue.',
-          position: queueSize, // Simplified: just show current queue size
+          position: await redis.zcount('matchmaking_queue', '-inf', '+inf'), // Total players in queue
           timestamp: Date.now()
         });
       } catch (error) {
@@ -302,7 +332,8 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
 
     socket.on('leave_matchmaking', async () => {
       try {
-        await removeFromMatchmakingQueue(socket.id, redis);
+        await redis.zrem('matchmaking_queue', socket.id);
+        await redis.del(`player:${socket.id}`);
         socket.emit('matchmaking_left', {
           message: 'Removed from matchmaking queue.',
           timestamp: Date.now()
@@ -313,22 +344,4 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
       }
     });
   });
-
-  // Clean up stale games (e.g., inactive for 30 minutes)
-  // This should be handled by Redis TTL or a separate cleanup job if not using Redis TTL effectively
-  // setInterval(async () => {
-  //   // Logic for cleaning games in GameStore if not solely relying on Redis TTL
-  // }, 5 * 60 * 1000); 
-}
-
-// Helper functions for matchmaking queue (can be part of matchmaking.ts or here if simple)
-async function addToMatchmakingQueue(socketId: string, playerName: string, rating: number, redis: Redis) {
-  const playerData = { id: socketId, name: playerName, rating: rating || 1000, joinTime: Date.now() };
-  await redis.set(`player:${socketId}`, JSON.stringify(playerData));
-  await redis.zadd('matchmaking_queue', playerData.joinTime, socketId); // Score by join time for FIFO
-}
-
-async function removeFromMatchmakingQueue(socketId: string, redis: Redis) {
-  await redis.zrem('matchmaking_queue', socketId);
-  await redis.del(`player:${socketId}`);
 }

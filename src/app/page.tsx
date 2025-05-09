@@ -4,14 +4,12 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { JoinGameForm } from '@/components/game/JoinGameForm';
-import { useGameConnection } from '@/hooks/useGameConnection';
-import { useToast } from '@/hooks/use-toast'; // Correct import for toast
+import { useGameConnection, useGameStore } from '@/hooks/useGameConnection'; // Import Zustand store
+import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { Toaster } from '@/components/ui/toaster'; // Correct import for Toaster
+import { Toaster } from '@/components/ui/toaster';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } } from '@/components/ui/card';
 
 
 export default function HomePage() {
@@ -21,29 +19,32 @@ export default function HomePage() {
     joinGame, 
     joinMatchmaking,
     leaveMatchmaking,
-    gameId: connectedGameId, // Renamed from gameId to avoid conflict with local state gameId
-    error: gameConnectionError, 
     clearError,
-    isConnected,
-    localPlayerId, // Useful to know if we are player 1 or 2 after joining/creating
-  } = useGameConnection();
-  
-  const { toast } } from useToast();
+  } = useGameConnection(); // Actions from the hook
+
+  // Subscribe to Zustand store for reactive state
+  const { 
+    gameId: connectedGameId, 
+    localPlayerId, 
+    error: gameConnectionError, 
+    isConnected 
+  } = useGameStore();
+
+  const { toast } = useToast();
   const { t } = useTranslation();
   const [isLoading, setIsLoading] = useState(false);
   const [isMatchmaking, setIsMatchmaking] = useState(false);
-  const [playerName, setPlayerName] = useState(''); // Store player name locally
+  // Player name could be stored in Zustand or local state for forms
+  // For simplicity, JoinGameForm will handle its own internal name state.
 
-  // Effect to navigate when gameId is set (meaning game created or joined successfully)
   useEffect(() => {
-    if (connectedGameId && localPlayerId) { // Ensure both gameId and playerId are set
+    if (connectedGameId && localPlayerId) {
       setIsLoading(false);
-      setIsMatchmaking(false); // Stop matchmaking if a game starts
+      setIsMatchmaking(false);
       router.push(`/game/${connectedGameId}`);
     }
   }, [connectedGameId, localPlayerId, router]);
 
-  // Effect to show errors from the game connection
   useEffect(() => {
     if (gameConnectionError) {
       toast({
@@ -52,8 +53,8 @@ export default function HomePage() {
         variant: "destructive",
       });
       setIsLoading(false); 
-      setIsMatchmaking(false); // Stop matchmaking on error
-      clearError(); // Clear error after showing
+      setIsMatchmaking(false);
+      clearError(); 
     }
   }, [gameConnectionError, toast, t, clearError]);
 
@@ -62,13 +63,13 @@ export default function HomePage() {
       toast({ title: t('errorTitle'), description: t('playerNameRequired'), variant: "destructive" });
       return;
     }
-    if (!requestedGameId.trim()) {
+     if (!requestedGameId.trim()) { // Assuming createGame might take gameId for private games
         toast({ title: t('errorTitle'), description: t('gameIdRequired'), variant: "destructive" });
         return;
     }
-    setPlayerName(pName); // Store for potential use if needed across sessions/rejoins
     setIsLoading(true);
-    createGame(pName, { isPublic: false }); // Example: create private game by default
+    // options like isPublic can be passed here
+    createGame(pName, { isPublic: false, gameIdToCreate: requestedGameId }); 
   };
 
   const handleJoinGame = (pName: string, gameIdToJoin: string) => {
@@ -76,9 +77,8 @@ export default function HomePage() {
       toast({ title: t('errorTitle'), description: t('enterPlayerNameAndGameId'), variant: "destructive" });
       return;
     }
-    setPlayerName(pName);
     setIsLoading(true);
-    joinGame(pName, gameIdToJoin);
+    joinGame(gameIdToJoin, pName);
   };
 
   const handleJoinMatchmaking = (pName: string) => {
@@ -86,10 +86,9 @@ export default function HomePage() {
         toast({ title: t('errorTitle'), description: t('playerNameRequired'), variant: "destructive" });
         return;
     }
-    setPlayerName(pName);
-    setIsLoading(true); // Or a specific matchmaking loading state
+    setIsLoading(true);
     setIsMatchmaking(true);
-    joinMatchmaking(pName); // Optional: add rating e.g., joinMatchmaking(pName, 1200)
+    joinMatchmaking(pName); 
   };
 
   const handleCancelMatchmaking = () => {
@@ -98,7 +97,7 @@ export default function HomePage() {
     setIsLoading(false);
   }
 
-  if (!isConnected && !gameConnectionError) {
+  if (!isConnected && !gameConnectionError && typeof window !== 'undefined') { // Check for window to avoid SSR issues with initial connection
     return (
       <main className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-4">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[hsl(var(--primary))]"></div>
@@ -136,7 +135,6 @@ export default function HomePage() {
             onJoinGame={handleJoinGame} 
             onJoinMatchmaking={handleJoinMatchmaking}
           />
-          {/* Display a message if connection failed but isConnected is false */}
           {gameConnectionError && !isConnected && (
             <Card className="mt-4 w-full max-w-md border-destructive">
               <CardHeader>
@@ -156,11 +154,3 @@ export default function HomePage() {
     </main>
   );
 }
-
-// Add these new translation keys to en.json and fr.json
-// "playerNameRequired": "Player name is required."
-// "gameIdRequired": "Game ID is required."
-// "searchingForOpponent": "Searching for an opponent..."
-// "cancelMatchmaking": "Cancel Matchmaking"
-// "connectionFailed": "Connection Failed"
-// "retryConnection": "Retry Connection"

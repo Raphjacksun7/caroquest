@@ -20,7 +20,7 @@ const gameStore = new GameStore(redis);
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
-const port = parseInt(process.env.PORT || "9002", 10); // Using existing port 9002
+const port = parseInt(process.env.PORT || "3000", 10); // Use port 3000 as per new spec
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
@@ -72,7 +72,7 @@ app.prepare().then(() => {
   });
 
   // Setup matchmaking system
-  setupMatchmaking(gameStore, redis, io); // Pass io to matchmaking for notifications
+  setupMatchmaking(gameStore, redis, io); // Pass io to matchmaking
 
   // Setup game socket handlers
   setupGameSockets(io, gameStore, redis);

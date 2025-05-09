@@ -77,11 +77,16 @@
   "rulesBlockingDescription2": "Un pion bloqué (visiblement estompé ou marqué) ne peut pas être utilisé dans une diagonale gagnante.",
   "rulesBlockingDescription3": "Les pions qui bloquent activement (visiblement marqués, par exemple avec une bordure plus épaisse) ne peuvent pas être utilisés dans une diagonale gagnante.",
   "rulesBlockingDescription4": "Placement Restreint : Pendant le placement, vous ne pouvez pas placer un pion dans une case vide si elle est déjà \"prise en sandwich\" par deux pions de votre adversaire (par exemple, PionAdverse - VotreCaseVide - PionAdverse).",
-  "rulesBlockingDescription5": "Zones Mortes : Si vous avez deux pions de votre couleur séparés par une case vide de la couleur assignée à votre joueur (VotrePion - CaseVideDeVotreCouleur - VotrePion) horizontalement ou verticalement, cette case vide devient une \"zone morte\" (marquée d'un '×') pour l'adversaire. Il ne peut pas l'utiliser dans sa diagonale gagnante.",
+  "rulesBlockingDescription5": "Zones Mortes : Si vous avez deux pions de votre couleur séparés par une case vide de la couleur assignée à votre joueur (VotrePion - CaseVideDeVotreCouleur - VotrePion) horizontalement ou verticalement, cette case vide devient une \"zone morte\" (marquée d'un '×') pour l'adversaire. Il ne peut pas l'utiliser dans sa diagonale gagnante ou y placer ses pions.",
   "rulesBlockingDescription6": "Les pions créant une zone morte (visiblement marqués, par exemple avec une bordure différente) ne peuvent pas être utilisés dans une diagonale gagnante.",
   "rulesWinningDescription": "Soyez le premier à aligner 4 de vos pions en diagonale. Les pions doivent être sur la couleur qui vous est assignée et ne pas être impliqués dans un blocage/création de zone morte, ni la ligne ne peut traverser une zone morte adverse.",
   "connectingToServer": "Connexion au serveur...",
   "loadingGameDetails": "Chargement des détails de la partie...",
+  "joiningGame": "Rejoint la partie",
+  "AIsTurn": "Tour de l'IA",
+  "waitForAIMove": "Veuillez attendre que l'IA se déplace.",
+  "singlePlayerMode": "Mode Un Joueur",
+  "multiplayerMode": "Mode Multijoueur",
   "joinOrCreateGame": "Rejoindre ou Créer une Partie",
   "enterDetailsToPlay": "Entrez votre nom et un ID de partie pour commencer à jouer.",
   "playerNameLabel": "Votre Nom",
@@ -114,5 +119,6 @@
   "searchingForOpponent": "Recherche d'un adversaire...",
   "cancelMatchmaking": "Annuler Matchmaking",
   "connectionFailed": "Échec de la Connexion",
-  "retryConnection": "Réessayer la Connexion"
+  "retryConnection": "Réessayer la Connexion",
+  "loadingGame": "Chargement de l'état du jeu..."
 }

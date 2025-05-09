@@ -26,19 +26,24 @@ class MCTSNode {
       for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
         const square = state.board[i];
         // Simplified validation - real validation is more complex
-        if (square.boardColor === state.playerColors[playerId] && !square.pawn) {
-          actions.push({ type: 'place', squareIndex: i });
+        // Needs to check square.boardColor === state.playerColors[playerId]
+        // and if square is not a dead zone for playerId, etc.
+        if (square && square.boardColor === state.playerColors[playerId] && !square.pawn && !(state.deadZoneSquares.get(i) === playerId)) {
+             // Add more checks from isValidPlacement from gameLogic.ts
+            actions.push({ type: 'place', squareIndex: i });
         }
       }
     } else { // Movement phase
       for (let fromIdx = 0; fromIdx < BOARD_SIZE * BOARD_SIZE; fromIdx++) {
         const fromSquare = state.board[fromIdx];
-        if (fromSquare.pawn?.playerId === playerId && !state.blockedPawnsInfo.has(fromIdx)) {
+        // Ensure pawn exists, belongs to current player, and is not blocked
+        if (fromSquare && fromSquare.pawn?.playerId === playerId && !state.blockedPawnsInfo.has(fromIdx)) {
           for (let toIdx = 0; toIdx < BOARD_SIZE * BOARD_SIZE; toIdx++) {
             const toSquare = state.board[toIdx];
-            // Simplified validation
-            if (!toSquare.pawn && toSquare.boardColor === state.playerColors[playerId] && 
+            // Simplified validation: ensure target is empty, correct color, and not a dead zone
+            if (toSquare && !toSquare.pawn && toSquare.boardColor === state.playerColors[playerId] && 
                 !(state.deadZoneSquares.get(toIdx) === playerId)) {
+              // Add more checks from isValidMove from gameLogic.ts
               actions.push({ type: 'move', fromIndex: fromIdx, toIndex: toIdx });
             }
           }
@@ -66,12 +71,11 @@ class MCTSNode {
   }
 
   expand() {
-    if (this.untriedActions.length === 0) return null; // Should not happen if selected correctly
+    if (this.untriedActions.length === 0) return null;
 
     const actionIndex = Math.floor(Math.random() * this.untriedActions.length);
     const action = this.untriedActions.splice(actionIndex, 1)[0];
     
-    // applyAction needs to be a complete implementation
     const newState = this.applyAction(JSON.parse(JSON.stringify(this.state)), action); 
     
     const childNode = new MCTSNode(newState, this, action);
@@ -79,21 +83,23 @@ class MCTSNode {
     return childNode;
   }
 
-  // Placeholder - this needs full game logic from gameLogic.ts, adapted for this context
+  // This applyAction needs to MIRROR your main gameLogic's placePawn and movePawn
+  // including all derived state updates (blockedPawns, deadZones, winner, etc.)
   applyAction(state, action) {
-    // This is a critical part and needs to mirror your main gameLogic's
-    // placePawn and movePawn functions, including all updates to derived state
-    // (blockedPawnsInfo, deadZoneSquares, deadZoneCreatorPawnsInfo, winner, etc.)
-    // For this placeholder, we'll just simulate a change for structure.
-    
-    // Deep clone state to avoid modifying the original node's state directly
-    const newState = JSON.parse(JSON.stringify(state));
+    const newState = JSON.parse(JSON.stringify(state)); // Deep clone
 
     if (action.type === 'place') {
         if(newState.board[action.squareIndex]) {
-            newState.board[action.squareIndex].pawn = { playerId: newState.currentPlayerId, id: 'ai_pawn', color: newState.playerColors[newState.currentPlayerId]};
+            newState.board[action.squareIndex].pawn = { 
+                id: `p${newState.currentPlayerId}_ai`, // Simplified ID for AI
+                playerId: newState.currentPlayerId, 
+                color: newState.playerColors[newState.currentPlayerId]
+            };
             newState.pawnsToPlace[newState.currentPlayerId]--;
             newState.placedPawns[newState.currentPlayerId]++;
+            if (newState.pawnsToPlace[1] === 0 && newState.pawnsToPlace[2] === 0) {
+                newState.gamePhase = 'movement';
+            }
         }
     } else if (action.type === 'move') {
         if(newState.board[action.fromIndex] && newState.board[action.toIndex]) {
@@ -102,40 +108,49 @@ class MCTSNode {
         }
     }
     
-    // Simulate turn change
+    // Switch player
     newState.currentPlayerId = newState.currentPlayerId === 1 ? 2 : 1;
-    
-    // TODO: Recalculate winner, blocked status, dead zones, etc.
-    // This is non-trivial and essential for MCTS to work correctly.
-    // For now, it's a very simplified version.
-    
+
+    // CRITICAL: Recalculate blockedPawns, deadZones, and winner.
+    // This requires importing or re-implementing updateBlockingStatus, updateDeadZones, checkWinCondition.
+    // For simplicity, this is omitted here but is ESSENTIAL for a working MCTS.
+    // Example (conceptual - these functions are not defined in this worker context):
+    // const { blockedPawns, blockingPawns } = updateBlockingStatus(newState.board);
+    // newState.blockedPawnsInfo = blockedPawns;
+    // newState.blockingPawnsInfo = blockingPawns;
+    // const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newState.board, newState.playerColors);
+    // newState.deadZoneSquares = deadZones;
+    // newState.deadZoneCreatorPawnsInfo = deadZoneCreatorPawns;
+    // const winCheck = checkWinCondition(newState);
+    // newState.winner = winCheck.winner;
+    // newState.winningLine = winCheck.winningLine;
+
     return newState;
   }
 
   rollout() {
     let currentState = JSON.parse(JSON.stringify(this.state));
     let depth = 0;
-    const MAX_ROLLOUT_DEPTH = 50; // Prevent infinite loops
+    const MAX_ROLLOUT_DEPTH = 50; 
 
     while (!this.isTerminal(currentState) && depth < MAX_ROLLOUT_DEPTH) {
       const actions = this.getValidActions(currentState);
-      if (actions.length === 0) break; // No valid moves, could be a draw or blocked state
+      if (actions.length === 0) break; 
       
       const action = actions[Math.floor(Math.random() * actions.length)];
-      currentState = this.applyAction(currentState, action); // Apply action to a deep copy
+      currentState = this.applyAction(currentState, action); 
       depth++;
     }
-    return this.getResult(currentState, this.state.currentPlayerId); // Pass original player perspective
+    return this.getResult(currentState, this.state.currentPlayerId); 
   }
 
   isTerminal(state) {
-    // Placeholder: check for win, draw, or max depth
-    return state.winner !== null; // A more robust check would include draw conditions
+    return state.winner !== null; 
   }
 
   getResult(terminalState, perspectivePlayerId) {
-    if (terminalState.winner === perspectivePlayerId) return 1; // Win for perspective player
-    if (terminalState.winner !== null) return 0; // Loss for perspective player (opponent won)
+    if (terminalState.winner === perspectivePlayerId) return 1; 
+    if (terminalState.winner !== null && terminalState.winner !== perspectivePlayerId) return 0; // Loss for perspective (opponent won)
     return 0.5; // Draw or undecided
   }
 
@@ -143,11 +158,14 @@ class MCTSNode {
     let node = this;
     while(node) {
         node.visits++;
-        // If it's the opponent's turn in the parent node, a win for current node is a loss for parent.
-        if (node.parent && node.parent.state.currentPlayerId !== node.state.currentPlayerId) {
-            node.wins += (1 - result);
+        // Result is from the perspective of the player whose turn it was AT THE NODE BEING UPDATED.
+        // If the current node's state represents a turn for the player who is perspectivePlayerId in rollout,
+        // then a win (result=1) is a win.
+        // If it's the opponent's turn in this node, then a win for perspectivePlayerId is a loss for this node's player.
+        if (node.state.currentPlayerId === this.state.currentPlayerId) { // `this.state.currentPlayerId` is perspectivePlayerId
+             node.wins += result;
         } else {
-            node.wins += result;
+             node.wins += (1 - result);
         }
         node = node.parent;
     }
@@ -156,30 +174,30 @@ class MCTSNode {
 
 class MCTS {
   constructor(options = {}) {
-    this.iterations = options.iterations || 100; // Reduced for web worker speed
-    this.timeLimit = options.timeLimit || 500;  // Reduced time limit
+    this.iterations = options.iterations || 100; 
+    this.timeLimit = options.timeLimit || 500;  
   }
   
   findBestMove(initialState) {
-    const rootNode = new MCTSNode(JSON.parse(JSON.stringify(initialState))); // Work with a copy
+    const rootNode = new MCTSNode(JSON.parse(JSON.stringify(initialState))); 
     const startTime = Date.now();
     
     if (rootNode.untriedActions.length === 0) {
-        return null; // No possible moves
+        return null; 
     }
     if (rootNode.untriedActions.length === 1) {
-        return rootNode.untriedActions[0]; // Only one move, take it
+        return rootNode.untriedActions[0]; 
     }
 
     for (let i = 0; i < this.iterations; i++) {
-      if (Date.now() - startTime > this.timeLimit && i > 0) break; // Ensure at least one iteration if possible
+      if (Date.now() - startTime > this.timeLimit && i > 0) break; 
       
       let node = rootNode;
       // Selection
       while (node.untriedActions.length === 0 && node.children.length > 0) {
         const selected = node.selectChild();
-        if (!selected) { // This can happen if all children have 0 visits initially
-            node = node.children[Math.floor(Math.random() * node.children.length)]; // Fallback to random
+        if (!selected) { 
+            node = node.children[Math.floor(Math.random() * node.children.length)]; 
             break;
         }
         node = selected;
@@ -198,19 +216,17 @@ class MCTS {
       node.backpropagate(result);
     }
     
-    if (rootNode.children.length === 0) return null; // No moves explored
+    if (rootNode.children.length === 0) return null; 
 
-    // Select the child with the highest win rate (or most visits as fallback)
     let bestChild = rootNode.children[0];
     let maxScore = -Infinity;
 
     for(const child of rootNode.children) {
-        const score = child.visits > 0 ? (child.wins / child.visits) : -Infinity;
+        const score = child.visits > 0 ? (child.wins / child.visits) : -Infinity; // Win rate
         if (score > maxScore) {
             maxScore = score;
             bestChild = child;
         } else if (score === maxScore && child.visits > (bestChild.visits || 0)) {
-            // Tie-breaking with visits
             bestChild = child;
         }
     }
@@ -221,6 +237,15 @@ class MCTS {
 self.onmessage = function(e) {
   const { state, difficulty } = e.data;
   
+  // MCTS needs mutable copies of complex objects like Set and Map to be actual Set/Map instances
+  // The state coming from postMessage will have these as plain objects.
+  // This is a simplified conversion; a robust solution would deeply reconstruct these.
+  const reconstructedState = JSON.parse(JSON.stringify(state)); // Basic deep clone
+  reconstructedState.blockedPawnsInfo = new Set(Array.from(state.blockedPawnsInfo || []));
+  reconstructedState.blockingPawnsInfo = new Set(Array.from(state.blockingPawnsInfo || []));
+  reconstructedState.deadZoneSquares = new Map(Object.entries(state.deadZoneSquares || {}));
+  reconstructedState.deadZoneCreatorPawnsInfo = new Set(Array.from(state.deadZoneCreatorPawnsInfo || []));
+  
   const options = {
     easy: { iterations: 50, timeLimit: 200 },
     medium: { iterations: 200, timeLimit: 500 },
@@ -229,10 +254,10 @@ self.onmessage = function(e) {
   
   const mcts = new MCTS(options[difficulty] || options.medium);
   try {
-    const bestMove = mcts.findBestMove(state);
-    self.postMessage({ move: bestMove });
+    const bestMove = mcts.findBestMove(reconstructedState);
+    self.postMessage({ type: 'MOVE_RESULT', move: bestMove }); // Add type for clarity
   } catch (error) {
     console.error("MCTS Worker Error:", error);
-    self.postMessage({ error: error.message });
+    self.postMessage({ type: 'ERROR', error: error.message });
   }
 };
