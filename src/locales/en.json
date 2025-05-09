@@ -89,7 +89,7 @@
   "gameIdLabel": "Game ID",
   "gameIdPlaceholder": "Enter Game ID",
   "generateId": "Generate",
-  "gameIdHint": "Share this ID with your friend. Leave empty or generate to create a new game.",
+  "gameIdHint": "Share this ID with your friend to create or join a specific game.",
   "createGameButton": "Create Game",
   "joinGameButton": "Join Game",
   "waitingForOpponentTitle": "Waiting for Opponent...",
@@ -107,5 +107,12 @@
   "gameRoomID": "Game Room ID",
   "you": "You",
   "unknownPlayer": "Waiting...",
-  "enterPlayerNameAndGameId": "Please enter your name and a Game ID."
+  "enterPlayerNameAndGameId": "Please enter your name and a Game ID.",
+  "playerNameRequired": "Player name is required.",
+  "gameIdRequired": "Game ID is required.",
+  "joinMatchmakingButton": "Join Matchmaking",
+  "searchingForOpponent": "Searching for an opponent...",
+  "cancelMatchmaking": "Cancel Matchmaking",
+  "connectionFailed": "Connection Failed",
+  "retryConnection": "Retry Connection"
 }

@@ -7,9 +7,19 @@
     "target": "es2017",
     "isolatedModules": false,
     "noEmit": false,
-    "esModuleInterop": true, // Added for compatibility with commonjs modules like express
-    "resolveJsonModule": true // If you plan to import JSON files
+    "esModuleInterop": true, 
+    "resolveJsonModule": true 
   },
-  "include": ["server.ts", "src/lib/socketHandler.ts", "src/lib/gameLogic.ts", "src/types/**/*.ts"],
-  "exclude": ["node_modules", "src/app", "src/components", "src/hooks", "src/locales"]
+  "include": [
+    "server.ts", 
+    "src/lib/socketHandler.ts", 
+    "src/lib/gameLogic.ts",
+    "src/lib/types.ts",
+    "src/lib/gameStore.ts",
+    "src/lib/matchmaking.ts",
+    "src/lib/serialization.ts",
+    "src/lib/generated/**/*.ts", // Include generated FlatBuffers stubs
+    "src/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", "src/app", "src/components", "src/hooks", "src/locales", "public/workers"]
 }

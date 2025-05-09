@@ -89,7 +89,7 @@
   "gameIdLabel": "ID de la Partie",
   "gameIdPlaceholder": "Entrez l'ID de la partie",
   "generateId": "Générer",
-  "gameIdHint": "Partagez cet ID avec votre ami. Laissez vide ou générez pour créer une nouvelle partie.",
+  "gameIdHint": "Partagez cet ID avec votre ami pour créer ou rejoindre une partie spécifique.",
   "createGameButton": "Créer une Partie",
   "joinGameButton": "Rejoindre la Partie",
   "waitingForOpponentTitle": "En attente d'un adversaire...",
@@ -107,5 +107,12 @@
   "gameRoomID": "ID de la Salle de Jeu",
   "you": "Vous",
   "unknownPlayer": "En attente...",
-  "enterPlayerNameAndGameId": "Veuillez entrer votre nom et un ID de partie."
+  "enterPlayerNameAndGameId": "Veuillez entrer votre nom et un ID de partie.",
+  "playerNameRequired": "Le nom du joueur est requis.",
+  "gameIdRequired": "L'ID de la partie est requis.",
+  "joinMatchmakingButton": "Rejoindre Matchmaking",
+  "searchingForOpponent": "Recherche d'un adversaire...",
+  "cancelMatchmaking": "Annuler Matchmaking",
+  "connectionFailed": "Échec de la Connexion",
+  "retryConnection": "Réessayer la Connexion"
 }

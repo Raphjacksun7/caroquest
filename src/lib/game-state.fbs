@@ -1,0 +1,41 @@
+
+// game-state.fbs
+namespace StrategicPawns; // Match this in generated stubs
+
+enum SquareColor : byte { Light = 0, Dark = 1 }
+enum GamePhase : byte { Placement = 0, Movement = 1 }
+
+table Pawn {
+  id:string;
+  player_id:byte; // 1 or 2
+  color:SquareColor;
+}
+
+table Square {
+  index:int;
+  row:int;
+  col:int;
+  board_color:SquareColor;
+  pawn:Pawn;
+  highlight:byte; // 0: none, 1: selectedPawn, 2: validMove, 3: deadZoneIndicator
+}
+
+table GameState {
+  board:[Square];
+  current_player_id:byte; // 1 or 2
+  game_phase:GamePhase;
+  pawns_to_place_player1:int;
+  pawns_to_place_player2:int;
+  pawns_placed_player1:int;
+  pawns_placed_player2:int;
+  selected_pawn_index:int (default: -1); // Use -1 for null
+  winner:byte (default: 0); // 0: none, 1: player1, 2: player2
+  last_move_from:int (default: -1); // Use -1 for null
+  last_move_to:int (default: -1); // Use -1 if no last move
+  
+  // For synchronization and delta updates
+  seq_id:long; 
+  timestamp:long; 
+}
+
+root_type GameState;

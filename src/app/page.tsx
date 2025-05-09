@@ -1,62 +1,113 @@
 
 "use client";
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation'; // Use next/navigation for App Router
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { JoinGameForm } from '@/components/game/JoinGameForm';
-import { useGameConnection } from '@/hooks/useGameConnection'; // Import the hook
-import { useToast } from '@/hooks/use-toast';
+import { useGameConnection } from '@/hooks/useGameConnection';
+import { useToast } from '@/hooks/use-toast'; // Correct import for toast
 import { useTranslation } from '@/hooks/useTranslation';
-import { Toaster } from '@/components/ui/toaster';
+import { Toaster } from '@/components/ui/toaster'; // Correct import for Toaster
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
 
 export default function HomePage() {
   const router = useRouter();
-  const { createGame, joinGame, gameId, error } // Removed gameState, localPlayerId, players, isConnected as they are for an active game session
-    = useGameConnection(); // Initialize the hook, but we'll primarily use create/join actions here
-  const { toast } = useToast();
+  const { 
+    createGame, 
+    joinGame, 
+    joinMatchmaking,
+    leaveMatchmaking,
+    gameId: connectedGameId, // Renamed from gameId to avoid conflict with local state gameId
+    error: gameConnectionError, 
+    clearError,
+    isConnected,
+    localPlayerId, // Useful to know if we are player 1 or 2 after joining/creating
+  } = useGameConnection();
+  
+  const { toast } } from useToast();
   const { t } = useTranslation();
   const [isLoading, setIsLoading] = useState(false);
+  const [isMatchmaking, setIsMatchmaking] = useState(false);
+  const [playerName, setPlayerName] = useState(''); // Store player name locally
 
   // Effect to navigate when gameId is set (meaning game created or joined successfully)
-  React.useEffect(() => {
-    if (gameId) {
+  useEffect(() => {
+    if (connectedGameId && localPlayerId) { // Ensure both gameId and playerId are set
       setIsLoading(false);
-      router.push(`/game/${gameId}`);
+      setIsMatchmaking(false); // Stop matchmaking if a game starts
+      router.push(`/game/${connectedGameId}`);
     }
-  }, [gameId, router]);
+  }, [connectedGameId, localPlayerId, router]);
 
   // Effect to show errors from the game connection
-  React.useEffect(() => {
-    if (error) {
+  useEffect(() => {
+    if (gameConnectionError) {
       toast({
         title: t('errorTitle'),
-        description: error,
+        description: gameConnectionError,
         variant: "destructive",
       });
       setIsLoading(false); 
+      setIsMatchmaking(false); // Stop matchmaking on error
+      clearError(); // Clear error after showing
     }
-  }, [error, toast, t]);
+  }, [gameConnectionError, toast, t, clearError]);
 
-  const handleCreateGame = (playerName: string, requestedGameId: string) => {
-    if (!playerName.trim() || !requestedGameId.trim()) {
+  const handleCreateGame = (pName: string, requestedGameId: string) => {
+    if (!pName.trim()) {
+      toast({ title: t('errorTitle'), description: t('playerNameRequired'), variant: "destructive" });
+      return;
+    }
+    if (!requestedGameId.trim()) {
+        toast({ title: t('errorTitle'), description: t('gameIdRequired'), variant: "destructive" });
+        return;
+    }
+    setPlayerName(pName); // Store for potential use if needed across sessions/rejoins
+    setIsLoading(true);
+    createGame(pName, { isPublic: false }); // Example: create private game by default
+  };
+
+  const handleJoinGame = (pName: string, gameIdToJoin: string) => {
+    if (!pName.trim() || !gameIdToJoin.trim()) {
       toast({ title: t('errorTitle'), description: t('enterPlayerNameAndGameId'), variant: "destructive" });
       return;
     }
+    setPlayerName(pName);
     setIsLoading(true);
-    createGame(playerName, requestedGameId);
-    // Navigation will be handled by the useEffect watching `gameId`
+    joinGame(pName, gameIdToJoin);
   };
 
-  const handleJoinGame = (playerName: string, gameIdToJoin: string) => {
-    if (!playerName.trim() || !gameIdToJoin.trim()) {
-      toast({ title: t('errorTitle'), description: t('enterPlayerNameAndGameId'), variant: "destructive" });
-      return;
+  const handleJoinMatchmaking = (pName: string) => {
+    if(!pName.trim()){
+        toast({ title: t('errorTitle'), description: t('playerNameRequired'), variant: "destructive" });
+        return;
     }
-    setIsLoading(true);
-    joinGame(playerName, gameIdToJoin);
-    // Navigation will be handled by the useEffect watching `gameId`
+    setPlayerName(pName);
+    setIsLoading(true); // Or a specific matchmaking loading state
+    setIsMatchmaking(true);
+    joinMatchmaking(pName); // Optional: add rating e.g., joinMatchmaking(pName, 1200)
   };
 
+  const handleCancelMatchmaking = () => {
+    leaveMatchmaking();
+    setIsMatchmaking(false);
+    setIsLoading(false);
+  }
+
+  if (!isConnected && !gameConnectionError) {
+    return (
+      <main className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[hsl(var(--primary))]"></div>
+        <p className="text-muted-foreground mt-2">{t('connectingToServer')}</p>
+        <Toaster />
+      </main>
+    );
+  }
+  
   return (
     <main className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-4">
       <header className="mb-8 text-center">
@@ -65,15 +116,51 @@ export default function HomePage() {
         </h1>
         <p className="text-muted-foreground mt-2">{t('pageDescription')}</p>
       </header>
+      
       {isLoading ? (
         <div className="flex flex-col items-center gap-2">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[hsl(var(--primary))]"></div>
-          <p className="text-muted-foreground">{t('connectingToServer')}</p>
+          <p className="text-muted-foreground">
+            {isMatchmaking ? t('searchingForOpponent') : t('connectingToServer')}
+          </p>
+          {isMatchmaking && (
+            <Button variant="outline" onClick={handleCancelMatchmaking} className="mt-4">
+              {t('cancelMatchmaking')}
+            </Button>
+          )}
         </div>
       ) : (
-        <JoinGameForm onCreateGame={handleCreateGame} onJoinGame={handleJoinGame} />
+        <>
+          <JoinGameForm 
+            onCreateGame={handleCreateGame} 
+            onJoinGame={handleJoinGame} 
+            onJoinMatchmaking={handleJoinMatchmaking}
+          />
+          {/* Display a message if connection failed but isConnected is false */}
+          {gameConnectionError && !isConnected && (
+            <Card className="mt-4 w-full max-w-md border-destructive">
+              <CardHeader>
+                <CardTitle className="text-destructive">{t('connectionFailed')}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p>{gameConnectionError}</p>
+                <Button onClick={() => window.location.reload()} className="mt-2">
+                  {t('retryConnection')}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
       <Toaster />
     </main>
   );
 }
+
+// Add these new translation keys to en.json and fr.json
+// "playerNameRequired": "Player name is required."
+// "gameIdRequired": "Game ID is required."
+// "searchingForOpponent": "Searching for an opponent..."
+// "cancelMatchmaking": "Cancel Matchmaking"
+// "connectionFailed": "Connection Failed"
+// "retryConnection": "Retry Connection"
