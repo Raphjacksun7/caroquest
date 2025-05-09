@@ -16,10 +16,11 @@
     "src/lib/gameLogic.ts",
     "src/lib/types.ts",
     "src/lib/gameStore.ts",
-    "src/lib/matchmaking.ts",
+    // "src/lib/matchmaking.ts", // Removed
     "src/lib/serialization.ts",
     "src/lib/generated/**/*.ts",
-    "src/types/**/*.ts"
+    "src/types/**/*.ts",
+    "src/hooks/useGameConnection.ts" // Added PlayerInfo from here
   ],
   "exclude": ["node_modules", "src/app", "src/components", "src/hooks", "src/locales", "public/workers", "src/lib/clientUtils.ts"]
 }

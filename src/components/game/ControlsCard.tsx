@@ -3,7 +3,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { RefreshCw, HelpCircle, Settings2, Languages, User, Users } from 'lucide-react'; // Added User, Users
+import { RefreshCw, HelpCircle, Settings2, Languages } from 'lucide-react'; 
 import { useTranslation } from '@/hooks/useTranslation';
 import {
   DropdownMenu,
@@ -13,8 +13,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Switch } from '@/components/ui/switch'; // Added Switch
-import { Label } from '@/components/ui/label'; // Added Label
 
 
 interface ControlsCardProps {
@@ -22,17 +20,14 @@ interface ControlsCardProps {
   onOpenRules: () => void;
   pawnsPerPlayer: number; 
   isGameActive: boolean;
-  isSinglePlayer: boolean; // New prop
-  onToggleSinglePlayer: () => void; // New prop
+  // isSinglePlayer and onToggleSinglePlayer removed
 }
 
 export const ControlsCard = ({ 
     onReset, 
     onOpenRules, 
     pawnsPerPlayer, 
-    isGameActive,
-    isSinglePlayer,
-    onToggleSinglePlayer
+    isGameActive
 }: ControlsCardProps) => {
   const { t, setLanguage, currentLanguage } = useTranslation();
 
@@ -49,19 +44,6 @@ export const ControlsCard = ({
         <div className="space-y-4">
             <div className="text-sm font-medium">{t('pawnsPerPlayer', { count: pawnsPerPlayer })}</div>
             
-            <div className="flex items-center space-x-2">
-              <Switch 
-                id="single-player-mode" 
-                checked={isSinglePlayer}
-                onCheckedChange={onToggleSinglePlayer}
-                disabled={isGameActive} // Disable if game is active
-              />
-              <Label htmlFor="single-player-mode" className="flex items-center gap-1.5">
-                {isSinglePlayer ? <User size={16} /> : <Users size={16} />}
-                {isSinglePlayer ? t('singlePlayerMode') : t('multiplayerMode')}
-              </Label>
-            </div>
-
           <div className="flex flex-col sm:flex-row gap-2 pt-2">
             <Button onClick={onReset} variant="outline" className="flex-1 shadow-sm hover:shadow-md transition-shadow">
               <RefreshCw className="mr-2 h-4 w-4" /> {t('resetGame')}
@@ -94,7 +76,3 @@ export const ControlsCard = ({
     </Card>
   );
 };
-
-// Add new translation keys:
-// "singlePlayerMode": "Single Player Mode"
-// "multiplayerMode": "Multiplayer Mode"
