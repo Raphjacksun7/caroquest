@@ -1,7 +1,7 @@
 
 "use client";
 
-import type { SquareState, GameState, PlayerId } from '@/lib/gameLogic';
+import type { SquareState, GameState } from '@/lib/gameLogic';
 import { Pawn } from './Pawn';
 import { cn } from '@/lib/utils';
 import React from 'react';
@@ -28,7 +28,7 @@ export const Square = ({
   const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, selectedPawnIndex, winningLine } = gameState;
   const [isDragOver, setIsDragOver] = React.useState(false);
 
-  const isActualDeadZone = deadZoneSquares.has(index); // Check if the square is a dead zone for any player
+  const isActualDeadZone = deadZoneSquares.has(index); 
   const isWinningSquare = winningLine?.includes(index) ?? false;
 
   let squareBgClass = boardColor === 'light' 
@@ -43,11 +43,11 @@ export const Square = ({
   } else if (highlight === 'selectedPawn') {
     conditionalClasses = 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))] z-10';
   } else if (highlight === 'validMove') {
-    squareBgClass = boardColor === 'light' ? 'bg-green-200' : 'bg-green-700'; // Using Tailwind classes for valid moves
+    squareBgClass = boardColor === 'light' ? 'bg-green-200' : 'bg-green-700';
     hoverInteractionClasses = 'hover:bg-opacity-80';
      if(isDragOver) squareBgClass = boardColor === 'light' ? 'bg-green-300' : 'bg-green-800';
   } else if (lastMove?.to === index || lastMove?.from === index) {
-    squareBgClass = boardColor === 'light' ? 'bg-yellow-200' : 'bg-yellow-600'; // Using Tailwind for last move
+    squareBgClass = boardColor === 'light' ? 'bg-yellow-200' : 'bg-yellow-600';
   }
 
 
@@ -115,5 +115,3 @@ export const Square = ({
     </button>
   );
 };
-
-    

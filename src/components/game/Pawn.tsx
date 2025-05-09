@@ -25,7 +25,7 @@ export const Pawn = ({
   const { 
     blockedPawnsInfo, 
     blockingPawnsInfo, 
-    deadZoneCreatorPawns, // Changed from deadZoneCreatorPawnsInfo
+    deadZoneCreatorPawnsInfo, 
     winningLine,
     selectedPawnIndex,
     currentPlayerId,
@@ -35,7 +35,7 @@ export const Pawn = ({
 
   const isBlocked = blockedPawnsInfo.has(squareIndex);
   const isBlocking = blockingPawnsInfo.has(squareIndex);
-  const isCreatingDeadZone = deadZoneCreatorPawns.has(squareIndex); // Changed from deadZoneCreatorPawnsInfo
+  const isCreatingDeadZone = deadZoneCreatorPawnsInfo.has(squareIndex);
   const isPartOfWinningLine = winningLine?.includes(squareIndex) ?? false;
   const isSelected = selectedPawnIndex === squareIndex;
   const isCurrentPlayerPawn = playerId === currentPlayerId;
@@ -61,11 +61,17 @@ export const Pawn = ({
   }
 
   let tooltipContent = `Player ${playerId} Pawn.`;
-  if (isBlocked) tooltipContent = 'This pawn is BLOCKED. Cannot move or be part of a winning line.';
-  else if (isBlocking) tooltipContent = 'This pawn is BLOCKING an opponent. Cannot be used in a winning line.';
-  else if (isCreatingDeadZone) tooltipContent = 'This pawn is CREATING a DEAD ZONE. Cannot be used in a winning line.';
+  if (isBlocked) {
+    tooltipContent = 'This pawn is BLOCKED. Cannot move or be part of a winning line.';
+  } else if (isBlocking) {
+    tooltipContent = 'This pawn is BLOCKING an opponent. Cannot be used in a winning line.';
+  } else if (isCreatingDeadZone) {
+    tooltipContent = 'This pawn is CREATING a DEAD ZONE. It cannot be used in a winning diagonal and creates a square nearby that your opponent cannot use for winning.';
+  }
   
-  if (isPartOfWinningLine) tooltipContent = 'Part of the WINNING line!';
+  if (isPartOfWinningLine) {
+    tooltipContent = 'Part of the WINNING line!';
+  }
   
   const isDraggable = isCurrentPlayerPawn && gamePhase === 'movement' && !winner && !isBlocked;
   if (isDraggable) {
@@ -74,7 +80,6 @@ export const Pawn = ({
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     if (!isDraggable) return;
-    // Data now just needs to signal which pawn is dragged, selection is handled by state
     e.dataTransfer.setData('text/plain', JSON.stringify({ pawnIndex: squareIndex }));
     e.dataTransfer.effectAllowed = 'move';
     onPawnDragStart(squareIndex); 
@@ -83,7 +88,6 @@ export const Pawn = ({
 
   const handleDragEnd = () => {
     document.body.classList.remove('dragging-pawn');
-    // Highlights are cleared by drop handler or click handler now
   };
 
   return (
@@ -106,7 +110,7 @@ export const Pawn = ({
               winner && !isPartOfWinningLine && 'opacity-70' 
             )}
             aria-label={tooltipContent}
-            role="button" // draggable elements should ideally be buttons or anchors if interactive
+            role="button" 
             tabIndex={isDraggable ? 0 : -1}
           >
             <div className={cn(
@@ -126,4 +130,3 @@ export const Pawn = ({
     </TooltipProvider>
   );
 };
-
