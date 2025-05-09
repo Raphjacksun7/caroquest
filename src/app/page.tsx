@@ -1,266 +1,280 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { useGameConnection } from '@/hooks/useGameConnection';
-import { useToast } from '@/hooks/use-toast';
+import React, { useState, useEffect, useCallback } from 'react';
+import { GameBoard } from '@/components/game/GameBoard';
+import { 
+  createInitialGameState, 
+  placePawn, 
+  movePawn, 
+  selectPawn as selectPawnLogic, // Renamed to avoid conflict
+  clearHighlights,
+  GameState,
+  PlayerId,
+  SquareState, // Added SquareState
+  PAWNS_PER_PLAYER
+} from '@/lib/gameLogic';
+import type { Action } from '@/lib/ai/mcts';
+import { PlayerInfo } from '@/components/game/PlayerInfo';
+import { GameControls } from '@/components/game/GameControls';
+import { GameStatus } from '@/components/game/GameStatus';
+import { WinnerAnnouncement } from '@/components/game/WinnerAnnouncement';
+import { RulesDialog } from '@/components/game/RulesDialog';
+import { AIController } from '@/components/game/AIController';
+import { Toaster } from "@/components/ui/toaster";
+import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from '@/hooks/useTranslation';
-import { Toaster } from '@/components/ui/toaster';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Users, Bot, Wifi, Swords, Link as LinkIcon, BarChart } from 'lucide-react';
+import { Label } from "@/components/ui/label";
+import { Bot, Users, Wifi } from 'lucide-react'; // Assuming Wifi for remote play
 
 type GameMode = 'ai' | 'local' | 'remote';
 type AIDifficulty = 'easy' | 'medium' | 'hard';
 
-export default function HomePage() {
-  const router = useRouter();
-  const { createGame, joinGame, error: gameConnectionError, gameId: connectedGameId, localPlayerId, clearError, isConnected } = useGameConnection();
-  const { toast } = useToast();
-  const { t } = useTranslation();
 
+export default function DiagonalDominationPage() {
+  const [gameState, setGameState] = useState<GameState>(createInitialGameState(PAWNS_PER_PLAYER));
   const [gameMode, setGameMode] = useState<GameMode>('ai');
-  const [playerName1, setPlayerName1] = useState('');
-  const [playerName2, setPlayerName2] = useState(''); // For local multiplayer
-  const [remoteGameId, setRemoteGameId] = useState('');
-  const [isCreatingOrJoining, setIsCreatingOrJoining] = useState(false);
-  const [createdGameId, setCreatedGameId] = useState<string | null>(null);
   const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>('medium');
+  const [isAIThinking, setIsAIThinking] = useState(false);
+  const [isRulesOpen, setIsRulesOpen] = useState(false);
+  const { toast } = useToast();
+  const { t, currentLanguage, setLanguage } = useTranslation();
 
-  useEffect(() => {
-    // Persist player name
-    const storedPlayerName = localStorage.getItem('playerName');
-    if (storedPlayerName) {
-      setPlayerName1(storedPlayerName);
-    }
+  // Reset game to initial state
+  const resetGame = useCallback(() => {
+    setGameState(createInitialGameState(PAWNS_PER_PLAYER));
+    setIsAIThinking(false);
   }, []);
 
-  useEffect(() => {
-    if (gameConnectionError) {
-      toast({
-        title: t('errorTitle'),
-        description: gameConnectionError,
-        variant: "destructive",
-      });
-      setIsCreatingOrJoining(false);
-      clearError();
-    }
-  }, [gameConnectionError, toast, t, clearError]);
-
-  useEffect(() => {
-    if (connectedGameId && localPlayerId) { // Successfully created/joined remote game
-      setIsCreatingOrJoining(false);
-      router.push(`/game/${connectedGameId}`);
-    }
-  }, [connectedGameId, localPlayerId, router]);
-
-
-  const handleStartGame = () => {
-    if (!playerName1.trim()) {
-      toast({ title: t('errorTitle'), description: t('playerNameRequired'), variant: "destructive" });
+  // Handle AI's move
+  const handleAIMove = useCallback((action: Action | null) => {
+    setIsAIThinking(false); // AI has finished thinking
+    if (!action) {
+      toast({ title: t('aiErrorTitle'), description: "AI couldn't find a move.", variant: "destructive" });
       return;
     }
-    localStorage.setItem('playerName', playerName1.trim());
 
-    if (gameMode === 'ai') {
-      router.push(`/game/ai?playerName=${encodeURIComponent(playerName1.trim())}&difficulty=${aiDifficulty}`);
-    } else if (gameMode === 'local') {
-      if (!playerName2.trim()) {
-        toast({ title: t('errorTitle'), description: t('player2NameRequired'), variant: "destructive" });
-        return;
+    let newState: GameState | null = null;
+    if (action.type === 'place' && action.index !== undefined) {
+      newState = placePawn(gameState, action.index);
+    } else if (action.type === 'move' && action.fromIndex !== undefined && action.toIndex !== undefined) {
+      newState = movePawn(gameState, action.fromIndex, action.toIndex);
+    }
+
+    if (newState) {
+      setGameState(newState);
+    } else {
+      // This case should be rare if AI generates valid moves
+      toast({ title: t('aiErrorTitle'), description: "AI made an invalid move.", variant: "destructive" });
+    }
+  }, [gameState, toast, t]);
+
+
+  // Handle player's click on a square
+  const handleSquareClick = useCallback((index: number) => {
+    if (gameState.winner || (gameMode === 'ai' && gameState.currentPlayerId === 2 && isAIThinking)) {
+      return; // Game over or AI's turn and thinking
+    }
+
+    const { gamePhase, selectedPawnIndex } = gameState;
+
+    let newState: GameState | null = null;
+
+    if (gamePhase === 'placement') {
+      newState = placePawn(gameState, index);
+      if (!newState) {
+        toast({ title: t('invalidPlacement'), description: t('invalidPlacementDescription'), variant: "destructive" });
       }
-      localStorage.setItem('player2Name', playerName2.trim());
-      router.push(`/game/local?player1=${encodeURIComponent(playerName1.trim())}&player2=${encodeURIComponent(playerName2.trim())}`);
+    } else { // Movement phase
+      if (selectedPawnIndex === null) {
+        // Try to select a pawn
+        const square = gameState.board[index];
+        if (square.pawn && square.pawn.playerId === gameState.currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
+          newState = selectPawnLogic(gameState, index);
+        } else if (square.pawn && gameState.blockedPawnsInfo.has(index)){
+            toast({ title: t('pawnBlocked'), description: t('pawnBlockedDescription'), variant: "destructive" });
+        }
+      } else {
+        // Pawn selected, try to move or deselect
+        if (index === selectedPawnIndex) { // Clicked on selected pawn again
+          newState = clearHighlights(gameState);
+        } else {
+            const targetSquare = gameState.board[index];
+            if (targetSquare.highlight === 'validMove') {
+                newState = movePawn(gameState, selectedPawnIndex, index);
+            } else {
+                 // If clicked on another of player's pawns, select it
+                if (targetSquare.pawn && targetSquare.pawn.playerId === gameState.currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
+                    newState = selectPawnLogic(gameState, index);
+                } else {
+                    newState = clearHighlights(gameState); // Clicked on invalid square, clear selection
+                    toast({ title: t('invalidMove'), description: t('invalidMoveDescription'), variant: "destructive" });
+                }
+            }
+        }
+      }
     }
-  };
 
-  const handleCreateRemoteGame = () => {
-    if (!playerName1.trim()) {
-      toast({ title: t('errorTitle'), description: t('playerNameRequired'), variant: "destructive" });
-      return;
+    if (newState) {
+      setGameState(newState);
     }
-    localStorage.setItem('playerName', playerName1.trim());
-    setIsCreatingOrJoining(true);
-    createGame(playerName1.trim(), { gameIdToCreate: remoteGameId || undefined }); 
-    if (remoteGameId) setCreatedGameId(remoteGameId.toUpperCase());
-    else setCreatedGameId("...generating..."); 
-  };
+  }, [gameState, gameMode, isAIThinking, toast, t]);
   
-  useEffect(() => {
-    if (connectedGameId && isCreatingOrJoining && gameMode === 'remote') {
-        if(createdGameId === "...generating..." || createdGameId !== connectedGameId) {
-            setCreatedGameId(connectedGameId);
+  // Handle pawn drag start
+  const handlePawnDragStart = useCallback((pawnIndex: number) => {
+    if (gameState.gamePhase === 'movement' && !gameState.winner && 
+        (!gameState.blockedPawnsInfo.has(pawnIndex)) &&
+        (gameMode !== 'ai' || gameState.currentPlayerId !== 2) // Player can only drag their own pawns, not AI's
+    ) {
+        const pawnOwner = gameState.board[pawnIndex]?.pawn?.playerId;
+        if(pawnOwner === gameState.currentPlayerId){
+            setGameState(selectPawnLogic(gameState, pawnIndex));
         }
     }
-  }, [connectedGameId, isCreatingOrJoining, gameMode, createdGameId]);
+  }, [gameState, gameMode]);
 
-
-  const handleJoinRemoteGame = () => {
-    if (!playerName1.trim()) {
-      toast({ title: t('errorTitle'), description: t('playerNameRequired'), variant: "destructive" });
-      return;
+  // Handle pawn drop
+  const handlePawnDrop = useCallback((targetIndex: number) => {
+    if (gameState.selectedPawnIndex !== null && gameState.board[targetIndex].highlight === 'validMove') {
+      const newState = movePawn(gameState, gameState.selectedPawnIndex, targetIndex);
+      if (newState) {
+        setGameState(newState);
+      }
+    } else {
+      // Invalid drop, clear highlights
+      setGameState(clearHighlights(gameState));
+      if(gameState.selectedPawnIndex !== null && gameState.board[targetIndex].highlight !== 'validMove'){
+          toast({ title: t('invalidDrop'), description: t('invalidDropDescription'), variant: "destructive" });
+      }
     }
-    if (!remoteGameId.trim()) {
-      toast({ title: t('errorTitle'), description: t('gameIdRequired'), variant: "destructive" });
-      return;
-    }
-    localStorage.setItem('playerName', playerName1.trim());
-    setIsCreatingOrJoining(true);
-    joinGame(remoteGameId.trim().toUpperCase(), playerName1.trim());
-  };
-  
-  const generateRandomGameId = () => {
-    setRemoteGameId(Math.random().toString(36).substring(2, 8).toUpperCase());
-  };
+  }, [gameState, toast, t]);
 
-  const copyGameLink = () => {
-    if (!createdGameId) return;
-    const link = `${window.location.origin}/?joinGameId=${createdGameId}`; 
-    navigator.clipboard.writeText(link).then(() => {
-      toast({ title: t('linkCopiedTitle'), description: t('linkCopiedDescription') });
-    }).catch(err => {
-      toast({ title: t('errorTitle'), description: t('failedToCopyLink'), variant: "destructive" });
-    });
-  };
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const gameIdFromUrl = urlParams.get('joinGameId');
-    if (gameIdFromUrl) {
-      setRemoteGameId(gameIdFromUrl);
-      setGameMode('remote');
+    document.title = t('diagonalDomination');
+  }, [t, currentLanguage]);
+
+  // Show winner toast
+  useEffect(() => {
+    if (gameState.winner) {
+      const winnerName = gameState.winner === 1 ? t('player', {id: 1}) : (gameMode === 'ai' ? t('aiOpponent') : t('player', {id: 2}));
+      toast({
+        title: t('playerDynamicWins', { playerName: winnerName }),
+        description: t('congratulations'),
+        duration: 8000,
+      });
     }
-  }, []);
+  }, [gameState.winner, gameMode, toast, t]);
 
 
   return (
-    <main className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-4 selection:bg-[hsl(var(--primary))] selection:text-[hsl(var(--primary-foreground))]">
-      <Toaster />
-      <header className="mb-8 text-center">
-        <h1 className="text-5xl font-bold text-[hsl(var(--primary))] tracking-tight">
-          {t('diagonalDomination')}
-        </h1>
-        <p className="text-muted-foreground mt-2">{t('pageDescription')}</p>
-      </header>
+    <>
+      <div className="flex flex-col items-center justify-center p-4 min-h-screen bg-[hsl(var(--background))] text-[hsl(var(--foreground))] selection:bg-[hsl(var(--primary))] selection:text-[hsl(var(--primary-foreground))]">
+        <header className="mb-6 text-center">
+            <h1 className="text-4xl sm:text-5xl font-bold text-[hsl(var(--primary))] tracking-tight">
+              {t('diagonalDomination')}
+            </h1>
+        </header>
 
-      {!isConnected && gameMode === 'remote' && (
-         <div className="flex flex-col items-center gap-2 my-6">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[hsl(var(--primary))]"></div>
-          <p className="text-muted-foreground">{t('connectingToServer')}</p>
-        </div>
-      )}
+        {/* Game Mode & Difficulty Selection */}
+        {!gameState.winner && (gameState.placedPawns[1] === 0 && gameState.placedPawns[2] === 0) && (
+          <Card className="mb-6 p-4 w-full max-w-md shadow-lg">
+            <CardHeader className="p-2 pb-3">
+              <CardTitle className="text-xl">{t('gameSetup')}</CardTitle>
+            </CardHeader>
+            <CardContent className="p-2 space-y-4">
+              <div>
+                <Label className="text-base mb-2 block">{t('selectGameMode')}</Label>
+                <RadioGroup value={gameMode} onValueChange={(value: string) => setGameMode(value as GameMode)} className="flex space-x-4">
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="ai" id="mode-ai" />
+                    <Label htmlFor="mode-ai" className="flex items-center gap-1 cursor-pointer"><Bot size={18}/> {t('playVsAI')}</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="local" id="mode-local" />
+                    <Label htmlFor="mode-local" className="flex items-center gap-1 cursor-pointer"><Users size={18}/> {t('localTwoPlayer')}</Label>
+                  </div>
+                  {/* Remote mode can be added here if implemented */}
+                </RadioGroup>
+              </div>
 
-      <Card className="w-full max-w-lg shadow-xl">
-        <CardHeader>
-          <CardTitle className="text-2xl">{t('selectGameMode')}</CardTitle>
-          <CardDescription>{t('chooseHowToPlay')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <RadioGroup defaultValue="ai" value={gameMode} onValueChange={(value) => {setGameMode(value as GameMode); setCreatedGameId(null);}}>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="ai" id="mode-ai" />
-              <Label htmlFor="mode-ai" className="flex items-center gap-2 cursor-pointer"><Bot /> {t('playVsAI')}</Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="local" id="mode-local" />
-              <Label htmlFor="mode-local" className="flex items-center gap-2 cursor-pointer"><Users /> {t('localTwoPlayer')}</Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="remote" id="mode-remote" />
-              <Label htmlFor="mode-remote" className="flex items-center gap-2 cursor-pointer"><Wifi /> {t('remoteMultiplayer')}</Label>
-            </div>
-          </RadioGroup>
+              {gameMode === 'ai' && (
+                <div>
+                  <Label className="text-base mb-2 block">{t('aiDifficulty')}</Label>
+                  <RadioGroup value={aiDifficulty} onValueChange={(value: string) => setAiDifficulty(value as AIDifficulty)} className="flex space-x-4">
+                    {(['easy', 'medium', 'hard'] as AIDifficulty[]).map(diff => (
+                       <div className="flex items-center space-x-2" key={diff}>
+                         <RadioGroupItem value={diff} id={`diff-${diff}`} />
+                         <Label htmlFor={`diff-${diff}`} className="capitalize cursor-pointer">{t(diff)}</Label>
+                       </div>
+                    ))}
+                  </RadioGroup>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        
+        <GameStatus gameState={gameState} gameMode={gameMode} />
 
-          <div className="space-y-2">
-            <Label htmlFor="playerName1">{gameMode === 'local' ? t('player1Name') : t('yourName')}</Label>
-            <Input
-              id="playerName1"
-              value={playerName1}
-              onChange={(e) => setPlayerName1(e.target.value)}
-              placeholder={t('enterYourName')}
-              maxLength={20}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,_1fr)_auto_minmax(280px,_1fr)] gap-6 w-full max-w-7xl items-start mt-4">
+          <div className="space-y-4 lg:sticky lg:top-6">
+            <GameControls 
+                onReset={resetGame} 
+                onOpenRules={() => setIsRulesOpen(true)}
+                pawnsPerPlayer={PAWNS_PER_PLAYER}
+                isGameActive={!gameState.winner}
             />
+            <PlayerInfo playerId={1} name={t('player', {id: 1})} gameState={gameState} />
+             <PlayerInfo playerId={2} name={gameMode === 'ai' ? t('aiOpponent') : t('player', {id: 2})} gameState={gameState} />
           </div>
-
-          {gameMode === 'ai' && (
-            <div className="space-y-3 pt-2 border-t">
-              <Label className="flex items-center gap-2"><BarChart size={18} /> {t('aiDifficulty')}</Label>
-              <RadioGroup value={aiDifficulty} onValueChange={(value) => setAiDifficulty(value as AIDifficulty)}>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="easy" id="diff-easy" />
-                  <Label htmlFor="diff-easy" className="cursor-pointer">{t('easy')}</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="medium" id="diff-medium" />
-                  <Label htmlFor="diff-medium" className="cursor-pointer">{t('medium')}</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="hard" id="diff-hard" />
-                  <Label htmlFor="diff-hard" className="cursor-pointer">{t('hard')}</Label>
-                </div>
-              </RadioGroup>
-            </div>
-          )}
-
-          {gameMode === 'local' && (
-            <div className="space-y-2">
-              <Label htmlFor="playerName2">{t('player2Name')}</Label>
-              <Input
-                id="playerName2"
-                value={playerName2}
-                onChange={(e) => setPlayerName2(e.target.value)}
-                placeholder={t('enterPlayer2Name')}
-                maxLength={20}
-              />
-            </div>
-          )}
-
-          {gameMode === 'remote' && (
-            <div className="space-y-4 pt-2 border-t">
-                <Label htmlFor="gameIdInput">{t('gameIdLabel')}</Label>
-                <div className="flex gap-2">
-                    <Input
-                    id="gameIdInput"
-                    value={remoteGameId}
-                    onChange={(e) => setRemoteGameId(e.target.value.toUpperCase())}
-                    placeholder={t('enterGameIdToJoinOrCreate')}
-                    maxLength={10}
-                    />
-                    <Button variant="outline" onClick={generateRandomGameId} className="whitespace-nowrap">{t('generateId')}</Button>
-                </div>
-                <p className="text-xs text-muted-foreground">{t('gameIdHintRemote')}</p>
-                 <div className="flex flex-col sm:flex-row gap-3">
-                    <Button onClick={handleCreateRemoteGame} className="flex-1" disabled={!playerName1.trim() || isCreatingOrJoining || !isConnected}>
-                        <Swords className="mr-2 h-4 w-4" /> {isCreatingOrJoining && !connectedGameId ? t('creatingGame') : t('createGameButton')}
-                    </Button>
-                    <Button onClick={handleJoinRemoteGame} className="flex-1" variant="secondary" disabled={!playerName1.trim() || !remoteGameId.trim() || isCreatingOrJoining || !isConnected}>
-                        <LinkIcon className="mr-2 h-4 w-4" /> {isCreatingOrJoining && connectedGameId ? t('joiningGame') : t('joinGameButton')}
-                    </Button>
-                </div>
-                {createdGameId && (
-                    <div className="p-3 bg-muted rounded-md text-center">
-                        <p className="text-sm">{t('gameCreatedShareId')}</p>
-                        <div className="flex items-center justify-center gap-2 mt-1">
-                            <strong className="text-lg font-mono tracking-wider">{createdGameId}</strong>
-                            <Button variant="ghost" size="icon" onClick={copyGameLink} aria-label={t('copyGameLink')}>
-                                <LinkIcon className="h-4 w-4"/>
-                            </Button>
-                        </div>
-                    </div>
-                )}
-            </div>
-          )}
-
-          {(gameMode === 'ai' || gameMode === 'local') && (
-            <Button onClick={handleStartGame} className="w-full mt-4" disabled={isCreatingOrJoining}>
-              <Swords className="mr-2 h-4 w-4" /> {t('startGame')}
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-    </main>
+          
+          <div className="flex flex-col items-center justify-center">
+            <GameBoard 
+              gameState={gameState} 
+              onSquareClick={handleSquareClick}
+              onPawnDragStart={handlePawnDragStart}
+              onPawnDrop={handlePawnDrop}
+            />
+             {isAIThinking && gameMode === 'ai' && gameState.currentPlayerId === 2 && (
+                <div className="mt-4 text-sm text-muted-foreground animate-pulse">{t('AIsTurn')}</div>
+            )}
+          </div>
+          
+          <div className="hidden lg:block lg:sticky lg:top-6">
+            {/* Placeholder for potential future elements like detailed history or chat */}
+          </div>
+        </div>
+      </div>
+      
+      {/* AI Controller - non-visual component */}
+      {gameMode === 'ai' && gameState.currentPlayerId === 2 && !gameState.winner && (
+        <AIController 
+          gameState={gameState}
+          aiPlayerId={2}
+          onAIMove={handleAIMove}
+          difficulty={aiDifficulty}
+          isThinking={isAIThinking}
+          setIsThinking={setIsAIThinking}
+        />
+      )}
+      
+      <Toaster />
+      <RulesDialog 
+        isOpen={isRulesOpen} 
+        onClose={() => setIsRulesOpen(false)} 
+        pawnsPerPlayer={PAWNS_PER_PLAYER} 
+      />
+      {gameState.winner && (
+        <WinnerAnnouncement 
+            winner={gameState.winner}
+            winnerName={gameState.winner === 1 ? t('player', {id:1}) : (gameMode === 'ai' ? t('aiOpponent') : t('player', {id:2}))}
+            isOpen={!!gameState.winner} 
+            onOpenChange={(open) => { if (!open && gameState.winner) resetGame(); }} 
+            onPlayAgain={resetGame}
+        />
+      )}
+    </>
   );
 }
