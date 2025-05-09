@@ -1,4 +1,3 @@
-
 // gameLogic.ts - Core game logic separated from UI
 
 export type PlayerId = 1 | 2;
@@ -105,9 +104,9 @@ export function isValidPlacement(
   
   // Check if this square is a dead zone for the current player
   if (gameState.deadZoneSquares.get(squareIndex) === playerId) {
-    return false; // Cannot place in a dead zone for this player
+    return false; // Cannot place in a dead zone
   }
-
+  
   // Check if this is a restricted zone - a space between opponent's pawns
   const { row, col } = square;
   const opponentId = playerId === 1 ? 2 : 1;
@@ -154,10 +153,15 @@ export function isValidMove(
   const toSquare = gameState.board[toIndex];
 
   if (!fromSquare || !fromSquare.pawn || fromSquare.pawn.playerId !== playerId) return false; // Not player's pawn
-  if (gameState.blockedPawnsInfo.has(fromIndex)) return false; // Pawn is blocked
   if (!toSquare || toSquare.pawn) return false; // Destination occupied
   if (toSquare.boardColor !== gameState.playerColors[playerId]) return false; // Not player's assigned color square
+  if (gameState.blockedPawnsInfo.has(fromIndex)) return false; // Cannot move blocked pawns
   
+  // Check if destination square is a dead zone for the current player
+  if (gameState.deadZoneSquares.get(toIndex) === playerId) {
+    return false; // Cannot move to a dead zone
+  }
+
   // "Move anywhere on your color" rule for Movement Phase.
   return true;
 }
@@ -236,62 +240,58 @@ export function updateBlockingStatus(
 export function updateDeadZones(
   board: Readonly<SquareState[]>,
   playerColors: Readonly<Record<PlayerId, SquareColor>>
-): { deadZones: Map<number, PlayerId>, deadZoneCreatorPawns: Set<number> } {
-  const deadZones = new Map<number, PlayerId>(); 
-  const deadZoneCreatorPawns = new Set<number>(); 
-  
-  // Check horizontal dead zones
+): { deadZones: Map<number, PlayerId>; deadZoneCreatorPawns: Set<number> } { // Corrected return type
+  const deadZones = new Map<number, PlayerId>();
+  const deadZoneCreatorPawns = new Set<number>(); // Use the correct variable name
+
+  // Horizontal dead zones
   for (let row = 0; row < BOARD_SIZE; row++) {
     for (let col = 0; col < BOARD_SIZE - 2; col++) {
-      const leftIndex = row * BOARD_SIZE + col;
-      const centerIndex = row * BOARD_SIZE + (col + 1);
-      const rightIndex = row * BOARD_SIZE + (col + 2);
-      
-      const leftSquare = board[leftIndex];
-      const centerSquare = board[centerIndex];
-      const rightSquare = board[rightIndex];
-      
-      if (leftSquare?.pawn && !centerSquare?.pawn && rightSquare?.pawn) {
-        if (leftSquare.pawn.playerId === rightSquare.pawn.playerId) {
-          const playerCreating = leftSquare.pawn.playerId;
-          if (centerSquare.boardColor === playerColors[playerCreating]) {
-            const opponentPlayerId = playerCreating === 1 ? 2 : 1;
-            deadZones.set(centerIndex, opponentPlayerId);
-            deadZoneCreatorPawns.add(leftIndex);
-            deadZoneCreatorPawns.add(rightIndex);
-          }
+      const [p1Square, emptySquare, p2Square] = [ // Renamed for clarity
+        board[row * BOARD_SIZE + col],
+        board[row * BOARD_SIZE + (col + 1)],
+        board[row * BOARD_SIZE + (col + 2)],
+      ];
+
+      if (p1Square?.pawn && p2Square?.pawn && !emptySquare?.pawn &&
+          p1Square.pawn.playerId === p2Square.pawn.playerId) {
+        const creatorPlayerId = p1Square.pawn.playerId;
+        const opponentPlayerId = creatorPlayerId === 1 ? 2 : 1;
+        // A dead zone is created on an opponent-colored square between two of the current player's pawns.
+        if (emptySquare.boardColor === playerColors[opponentPlayerId]) {
+          deadZones.set(emptySquare.index, opponentPlayerId); // Dead zone for the opponent
+          deadZoneCreatorPawns.add(p1Square.index);
+          deadZoneCreatorPawns.add(p2Square.index);
         }
       }
     }
   }
-  
-  // Check vertical dead zones
+
+  // Vertical dead zones
   for (let col = 0; col < BOARD_SIZE; col++) {
     for (let row = 0; row < BOARD_SIZE - 2; row++) {
-      const topIndex = row * BOARD_SIZE + col;
-      const centerIndex = (row + 1) * BOARD_SIZE + col;
-      const bottomIndex = (row + 2) * BOARD_SIZE + col;
-      
-      const topSquare = board[topIndex];
-      const centerSquare = board[centerIndex];
-      const bottomSquare = board[bottomIndex];
-      
-      if (topSquare?.pawn && !centerSquare?.pawn && bottomSquare?.pawn) {
-        if (topSquare.pawn.playerId === bottomSquare.pawn.playerId) {
-          const playerCreating = topSquare.pawn.playerId;
-          if (centerSquare.boardColor === playerColors[playerCreating]) {
-            const opponentPlayerId = playerCreating === 1 ? 2 : 1;
-            deadZones.set(centerIndex, opponentPlayerId);
-            deadZoneCreatorPawns.add(topIndex);
-            deadZoneCreatorPawns.add(bottomIndex);
-          }
+      const [p1Square, emptySquare, p2Square] = [ // Renamed for clarity
+        board[row * BOARD_SIZE + col],
+        board[(row + 1) * BOARD_SIZE + col],
+        board[(row + 2) * BOARD_SIZE + col],
+      ];
+
+      if (p1Square?.pawn && p2Square?.pawn && !emptySquare?.pawn &&
+          p1Square.pawn.playerId === p2Square.pawn.playerId) {
+        const creatorPlayerId = p1Square.pawn.playerId;
+        const opponentPlayerId = creatorPlayerId === 1 ? 2 : 1;
+         if (emptySquare.boardColor === playerColors[opponentPlayerId]) {
+          deadZones.set(emptySquare.index, opponentPlayerId); // Dead zone for the opponent
+          deadZoneCreatorPawns.add(p1Square.index);
+          deadZoneCreatorPawns.add(p2Square.index);
         }
       }
     }
   }
-  
-  return { deadZones, deadZoneCreatorPawns };
+
+  return { deadZones, deadZoneCreatorPawns }; // Corrected return variable name
 }
+
 
 /**
  * Check if there's a winner in the current game state
@@ -302,7 +302,7 @@ export function checkWinCondition(gameState: Readonly<GameState>): { winner: Pla
   const diagonalDirections = [
     { dr: 1, dc: 1 },   // Down-Right
     { dr: 1, dc: -1 },  // Down-Left
-    // No need for Up-Right and Up-Left if we check all start positions
+    // No need to check Up-Right and Up-Left separately if we iterate all start positions
   ];
 
   for (const playerId of [1, 2] as PlayerId[]) {
@@ -333,7 +333,7 @@ export function checkWinCondition(gameState: Readonly<GameState>): { winner: Pla
                 blockedPawnsInfo.has(currentIndex) || 
                 blockingPawnsInfo.has(currentIndex) || 
                 deadZoneCreatorPawnsInfo.has(currentIndex) ||
-                deadZoneSquares.get(currentIndex) === playerId) {
+                deadZoneSquares.get(currentIndex) === playerId) { // Check if square is a dead zone for the current player
               possible = false;
               break;
             }
@@ -361,16 +361,28 @@ export function getValidMoveDestinations(
   gameState: Readonly<GameState>
 ): number[] {
   const validDestinations: number[] = [];
-  const pawnToMove = gameState.board[fromIndex]?.pawn;
-
-  if (!pawnToMove || pawnToMove.playerId !== playerId || gameState.blockedPawnsInfo.has(fromIndex)) {
-    return []; 
+  
+  const fromSquare = gameState.board[fromIndex];
+  if (!fromSquare?.pawn || fromSquare.pawn.playerId !== playerId) {
+    return []; // Not player's pawn
   }
   
-  for (let i = 0; i < gameState.board.length; i++) {
-    if (isValidMove(fromIndex, i, playerId, gameState)) {
-      validDestinations.push(i);
+  if (gameState.blockedPawnsInfo.has(fromIndex)) {
+    return []; // Pawn is blocked
+  }
+  
+  for (const square of gameState.board) {
+    const { index, boardColor, pawn } = square;
+    
+    if (pawn || boardColor !== gameState.playerColors[playerId]) {
+      continue;
     }
+    
+    if (gameState.deadZoneSquares.get(index) === playerId) {
+      continue;
+    }
+    
+    validDestinations.push(index);
   }
   
   return validDestinations;
@@ -395,10 +407,7 @@ export function placePawn(
     color: playerColors[currentPlayerId],
   };
   
-  const newBoard = board.map((sq, i) => {
-    if (i === index) return { ...sq, pawn: newPawn, highlight: undefined };
-    return {...sq, highlight: undefined}; // Clear all highlights
-  });
+  const newBoard = board.map((sq, i) => i === index ? { ...sq, pawn: newPawn, highlight: undefined } : {...sq, highlight: undefined});
   
   const newPawnsToPlace = { ...pawnsToPlace, [currentPlayerId]: pawnsToPlace[currentPlayerId] - 1 };
   const newPlacedPawns = { ...placedPawns, [currentPlayerId]: placedPawns[currentPlayerId] + 1 };
@@ -409,7 +418,7 @@ export function placePawn(
   }
   
   const { blockedPawns, blockingPawns } = updateBlockingStatus(newBoard);
-  const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newBoard, playerColors);
+  const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newBoard, playerColors); // Corrected variable name
   
   const tempGameState: GameState = {
     ...gameState,
@@ -420,7 +429,7 @@ export function placePawn(
     blockedPawnsInfo: blockedPawns,
     blockingPawnsInfo: blockingPawns,
     deadZoneSquares: deadZones,
-    deadZoneCreatorPawnsInfo: deadZoneCreatorPawns,
+    deadZoneCreatorPawnsInfo: deadZoneCreatorPawns, // Corrected variable name
     selectedPawnIndex: null, 
     lastMove: { from: null, to: index },
   };
@@ -431,7 +440,7 @@ export function placePawn(
     ...tempGameState,
     winner,
     winningLine,
-    currentPlayerId: winner ? tempGameState.currentPlayerId : (currentPlayerId === 1 ? 2 : 1),
+    currentPlayerId: winner ? gameState.currentPlayerId : (currentPlayerId === 1 ? 2 : 1),
   };
 }
 
@@ -453,14 +462,14 @@ export function movePawn(
   if (!pawnToMove) return null;
 
   const newBoard = board.map((sq, i) => {
-    let newSq = {...sq, highlight: undefined }; // Clear highlights
+    let newSq = {...sq, highlight: undefined }; 
     if (i === fromIndex) return { ...newSq, pawn: null };
     if (i === toIndex) return { ...newSq, pawn: pawnToMove };
     return newSq;
   });
   
   const { blockedPawns, blockingPawns } = updateBlockingStatus(newBoard);
-  const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newBoard, playerColors);
+  const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newBoard, playerColors); // Corrected variable name
   
   const tempGameState: GameState = {
     ...gameState,
@@ -468,7 +477,7 @@ export function movePawn(
     blockedPawnsInfo: blockedPawns,
     blockingPawnsInfo: blockingPawns,
     deadZoneSquares: deadZones,
-    deadZoneCreatorPawnsInfo: deadZoneCreatorPawns,
+    deadZoneCreatorPawnsInfo: deadZoneCreatorPawns, // Corrected variable name
     selectedPawnIndex: null, 
     lastMove: { from: fromIndex, to: toIndex },
   };
@@ -479,7 +488,7 @@ export function movePawn(
     ...tempGameState,
     winner,
     winningLine,
-    currentPlayerId: winner ? tempGameState.currentPlayerId : (currentPlayerId === 1 ? 2 : 1),
+    currentPlayerId: winner ? gameState.currentPlayerId : (currentPlayerId === 1 ? 2 : 1),
   };
 }
 
@@ -492,12 +501,6 @@ export function highlightValidMoves(
   pawnIndex: number
 ): GameState {
   const { currentPlayerId } = gameState;
-  const pawnToHighlight = gameState.board[pawnIndex]?.pawn;
-
-  if (!pawnToHighlight || pawnToHighlight.playerId !== currentPlayerId || gameState.blockedPawnsInfo.has(pawnIndex)) {
-    return clearHighlights(gameState); // Not player's pawn or pawn is blocked
-  }
-  
   const validDestinations = getValidMoveDestinations(pawnIndex, currentPlayerId, gameState);
   
   const newBoard = gameState.board.map((square, i) => {

@@ -2,15 +2,15 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
-import type { GameState, PlayerId, SquareState, Pawn as PawnType } from '@/lib/gameLogic';
+import type { GameState, PlayerId } from '@/lib/gameLogic';
 import { 
   createInitialGameState, 
   placePawn,
   movePawn,
   highlightValidMoves, 
   clearHighlights,
-  BOARD_SIZE,
-  PAWNS_PER_PLAYER
+  BOARD_SIZE, // Keep if needed by UI elements not in gameLogic
+  PAWNS_PER_PLAYER // Keep if needed by UI elements not in gameLogic
 } from '@/lib/gameLogic';
 
 import { GameBoard } from '@/components/game/GameBoard';
@@ -28,24 +28,21 @@ import { Dialog } from '@/components/ui/dialog';
 export default function DiagonalDominationPage() {
   const [gameState, setGameState] = useState<GameState>(createInitialGameState());
   const [isRulesDialogOpen, setIsRulesDialogOpen] = useState(false);
-  const [isWinnerDialogOpen, setIsWinnerDialogOpen] = useState(false);
+  // Winner dialog is now controlled by gameState.winner directly in WinnerDialog component
   const { toast } = useToast();
 
   useEffect(() => {
     if (gameState.winner) {
-      setIsWinnerDialogOpen(true);
       toast({
         title: `Player ${gameState.winner} Wins!`,
         description: "Congratulations on your strategic victory!",
         duration: 5000,
       });
-    } else {
-      setIsWinnerDialogOpen(false);
     }
   }, [gameState.winner, toast]);
 
   const handleSquareClick = useCallback((index: number) => {
-    const { gamePhase, currentPlayerId, selectedPawnIndex, winner } = gameState;
+    const { gamePhase, currentPlayerId, selectedPawnIndex, winner, board } = gameState;
 
     if (winner) return;
 
@@ -54,30 +51,34 @@ export default function DiagonalDominationPage() {
     if (gamePhase === 'placement') {
       newGameState = placePawn(gameState, index);
       if (!newGameState) {
-        toast({ title: "Invalid Placement", description: "Cannot place pawn here. Check rules.", variant: "destructive" });
+        toast({ title: "Invalid Placement", description: "Cannot place pawn here. Ensure the square is of your color, not occupied, not a restricted zone, and not a dead zone for you.", variant: "destructive" });
       }
     } else { // movement phase
-      if (selectedPawnIndex === null) {
-        const square = gameState.board[index];
+      if (selectedPawnIndex === null) { // No pawn selected, try to select one
+        const square = board[index];
         if (square.pawn && square.pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
           newGameState = highlightValidMoves(gameState, index);
         } else if (square.pawn && square.pawn.playerId === currentPlayerId && gameState.blockedPawnsInfo.has(index)) {
           toast({ title: "Pawn Blocked", description: "This pawn is blocked and cannot move.", variant: "destructive" });
         }
-      } else {
+      } else { // A pawn is selected
         if (selectedPawnIndex === index) { // Clicked on already selected pawn
              newGameState = clearHighlights(gameState); // Deselect
-        } else {
-            newGameState = movePawn(gameState, selectedPawnIndex, index);
-            if (!newGameState) {
-                 // If move is invalid, but clicked on another of player's own non-blocked pawns, select that one
-                const clickedSquare = gameState.board[index];
-                if (clickedSquare.pawn && clickedSquare.pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
-                    newGameState = highlightValidMoves(gameState, index);
-                } else {
-                    toast({ title: "Invalid Move", description: "Cannot move pawn there.", variant: "destructive" });
-                    newGameState = clearHighlights(gameState); // Clear selection on invalid move to other square
+        } else { // Attempting to move to a new square or select another pawn
+            const targetSquare = board[index];
+            if (targetSquare.highlight === 'validMove') { // If clicked on a valid move square
+                newGameState = movePawn(gameState, selectedPawnIndex, index);
+                if (!newGameState) { // Should ideally not happen if highlight is 'validMove' and logic is correct
+                     toast({ title: "Invalid Move", description: "Cannot move pawn there. Please check rules.", variant: "destructive" });
+                     newGameState = clearHighlights(gameState); 
                 }
+            } else if (targetSquare.pawn && targetSquare.pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
+                // Clicked on another of player's own non-blocked pawns, select that one
+                newGameState = highlightValidMoves(gameState, index);
+            } else {
+                // Clicked on an invalid square (e.g., opponent's pawn, empty non-valid square)
+                toast({ title: "Invalid Action", description: "Cannot move there or invalid selection.", variant: "destructive" });
+                newGameState = clearHighlights(gameState); // Clear selection
             }
         }
       }
@@ -90,11 +91,10 @@ export default function DiagonalDominationPage() {
 
   const resetGameHandler = useCallback(() => {
     setGameState(createInitialGameState());
-    setIsWinnerDialogOpen(false);
     toast({ title: "Game Reset", description: "A new game has started."});
   }, [toast]);
 
-  const handlePawnDragStart = (pawnIndex: number) => {
+  const handlePawnDragStart = useCallback((pawnIndex: number) => {
     const { gamePhase, currentPlayerId, winner, board, blockedPawnsInfo } = gameState;
     if (winner || gamePhase !== 'movement') return;
 
@@ -102,25 +102,29 @@ export default function DiagonalDominationPage() {
     if (pawnSquare.pawn && pawnSquare.pawn.playerId === currentPlayerId && !blockedPawnsInfo.has(pawnSquare.index)) {
       setGameState(highlightValidMoves(gameState, pawnIndex));
     }
-  };
+  }, [gameState]);
 
-  const handlePawnDrop = (targetIndex: number) => {
-    const { selectedPawnIndex, winner } = gameState;
+  const handlePawnDrop = useCallback((targetIndex: number) => {
+    const { selectedPawnIndex, winner, board } = gameState;
     if (winner || selectedPawnIndex === null) {
-      // If drop is not valid or no pawn selected, clear highlights
       setGameState(clearHighlights(gameState));
       return;
     }
-
-    const newGameState = movePawn(gameState, selectedPawnIndex, targetIndex);
-    if (newGameState) {
-      setGameState(newGameState);
+    
+    const targetSquare = board[targetIndex];
+    if (targetSquare.highlight === 'validMove') {
+        const newGameState = movePawn(gameState, selectedPawnIndex, targetIndex);
+        if (newGameState) {
+          setGameState(newGameState);
+        } else { // Should not happen if highlight is validMove
+          toast({ title: "Invalid Move", description: "Cannot drop pawn there.", variant: "destructive" });
+          setGameState(clearHighlights(gameState));
+        }
     } else {
-      toast({ title: "Invalid Move", description: "Cannot drop pawn there.", variant: "destructive" });
-      // Clear highlights if drop was invalid
-      setGameState(clearHighlights(gameState));
+        toast({ title: "Invalid Drop", description: "Cannot drop pawn on this square.", variant: "destructive" });
+        setGameState(clearHighlights(gameState));
     }
-  };
+  }, [gameState, toast]);
   
   return (
     <>
@@ -137,7 +141,7 @@ export default function DiagonalDominationPage() {
             currentPlayerId={gameState.currentPlayerId}
             winner={gameState.winner}
             selectedPawnIndex={gameState.selectedPawnIndex}
-            board={gameState.board} // Pass board for context if needed by StatusDisplay
+            board={gameState.board} 
            />
 
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,_1fr)_auto_minmax(280px,_1fr)] gap-4 sm:gap-6 items-start mt-4">
@@ -182,8 +186,8 @@ export default function DiagonalDominationPage() {
 
       <WinnerDialog 
         winner={gameState.winner}
-        isOpen={isWinnerDialogOpen}
-        onOpenChange={setIsWinnerDialogOpen}
+        isOpen={!!gameState.winner} // Control directly by winner state
+        onOpenChange={(open) => { if (!open && gameState.winner) resetGameHandler(); }} // Reset if dialog is closed after win
         onPlayAgain={resetGameHandler}
       />
     </>

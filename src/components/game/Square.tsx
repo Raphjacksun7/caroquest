@@ -1,11 +1,11 @@
-
 "use client";
 
-import type { SquareState, GameState } from '@/lib/gameLogic';
+import type { SquareState, GameState } from '@/lib/gameLogic'; // PlayerId removed as not directly used
 import { Pawn } from './Pawn';
 import { cn } from '@/lib/utils';
 import React from 'react';
-import { BOARD_SIZE } from '@/lib/gameLogic'; 
+import { BOARD_SIZE } from '@/lib/gameLogic';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface SquareProps {
   squareState: SquareState;
@@ -28,8 +28,17 @@ export const Square = ({
   const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, selectedPawnIndex, winningLine } = gameState;
   const [isDragOver, setIsDragOver] = React.useState(false);
 
-  const isActualDeadZone = deadZoneSquares.has(index); 
+  const deadZoneForPlayerId = deadZoneSquares.get(index);
+  const isDeadZone = deadZoneForPlayerId !== undefined;
+  const isDeadZoneForCurrentPlayer = deadZoneForPlayerId === currentPlayerId;
+  
+  const isCurrentPlayerSquare = boardColor === playerColors[currentPlayerId];
   const isWinningSquare = winningLine?.includes(index) ?? false;
+  
+  let tooltipContentText = '';
+  if (isDeadZone) {
+    tooltipContentText = `Dead Zone: Player ${deadZoneForPlayerId} cannot use this square in a winning diagonal or place/move pawns here.`;
+  }
 
   let squareBgClass = boardColor === 'light' 
     ? 'bg-[hsl(var(--board-light-square))]' 
@@ -45,27 +54,33 @@ export const Square = ({
   } else if (highlight === 'validMove') {
     squareBgClass = boardColor === 'light' ? 'bg-green-200' : 'bg-green-700';
     hoverInteractionClasses = 'hover:bg-opacity-80';
-     if(isDragOver) squareBgClass = boardColor === 'light' ? 'bg-green-300' : 'bg-green-800';
+    if(isDragOver) squareBgClass = boardColor === 'light' ? 'bg-green-300' : 'bg-green-800';
   } else if (lastMove?.to === index || lastMove?.from === index) {
     squareBgClass = boardColor === 'light' ? 'bg-yellow-200' : 'bg-yellow-600';
   }
 
-
   let cursorClass = 'cursor-default';
   if (!winner) {
-    if (gameState.gamePhase === 'placement' && !pawn && boardColor === playerColors[currentPlayerId]) {
+    if (gameState.gamePhase === 'placement' && 
+        !pawn && 
+        isCurrentPlayerSquare && 
+        !isDeadZoneForCurrentPlayer) {
       cursorClass = 'cursor-pointer';
     } else if (gameState.gamePhase === 'movement') {
       if (pawn && pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
         cursorClass = 'cursor-grab'; 
-      } else if (!pawn && highlight === 'validMove') {
+      } else if (!pawn && highlight === 'validMove' && !isDeadZoneForCurrentPlayer) { // Ensure not moving to a dead zone
         cursorClass = 'cursor-pointer'; 
       }
+    }
+    
+    if (isDeadZoneForCurrentPlayer) {
+      cursorClass = 'cursor-not-allowed';
     }
   }
   
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
-    if (highlight === 'validMove' && !pawn) { 
+    if (highlight === 'validMove' && !pawn && !isDeadZoneForCurrentPlayer) { 
       setIsDragOver(true);
     }
   };
@@ -74,7 +89,7 @@ export const Square = ({
     setIsDragOver(false);
   };
   
-  return (
+  const squareButton = (
     <button
       id={`square-${index}`}
       onClick={onClick}
@@ -89,20 +104,23 @@ export const Square = ({
         cursorClass,
         hoverInteractionClasses,
         isDragOver && highlight === 'validMove' && !pawn && 'ring-2 ring-[hsl(var(--highlight-valid-move))]',
+        isDeadZoneForCurrentPlayer && 'opacity-70', // Reduced opacity for current player's dead zones
       )}
-      aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isActualDeadZone ? ', Dead Zone' : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
-      disabled={!!winner && (!pawn || pawn.playerId !== currentPlayerId) && highlight !== 'selectedPawn'}
+      aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isDeadZone ? `, Dead Zone for Player ${deadZoneForPlayerId}` : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
+      disabled={!!winner || isDeadZoneForCurrentPlayer} // Disable if it's a dead zone for current player
     >
-      {isActualDeadZone && !pawn && ( 
-         <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-50 text-4xl font-bold pointer-events-none select-none">×</div>
+      {isDeadZone && !pawn && ( 
+        <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-60 text-4xl font-bold pointer-events-none select-none">×</div>
       )}
-      {highlight === 'validMove' && !pawn && !isActualDeadZone && (
+      
+      {highlight === 'validMove' && !pawn && !isDeadZone && ( // Don't show valid move dot if it's a dead zone
         <div className={cn(
             "absolute w-3 h-3 rounded-full opacity-70 pointer-events-none select-none",
             isDragOver ? "bg-[hsl(var(--foreground))]" : "bg-[hsl(var(--highlight-valid-move))]"
             )} 
         />
       )}
+      
       {pawn && (
         <Pawn
           pawn={pawn}
@@ -111,7 +129,23 @@ export const Square = ({
           onPawnDragStart={onPawnDragStart}
         />
       )}
-      {/* Algebraic notation removed as per request */}
     </button>
   );
+
+  if (tooltipContentText) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {squareButton}
+          </TooltipTrigger>
+          <TooltipContent side="top" align="center" className="bg-popover text-popover-foreground rounded-md px-3 py-1.5 text-sm shadow-md z-50">
+            <p>{tooltipContentText}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return squareButton;
 };

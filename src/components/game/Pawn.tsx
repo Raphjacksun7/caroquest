@@ -1,12 +1,10 @@
-
 "use client";
 
 import type { Pawn as PawnType, GameState } from '@/lib/gameLogic';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import React from 'react';
-import { Lock, Shield } from 'lucide-react';
-
+import { Lock, Shield, Zap } from 'lucide-react';
 
 interface PawnProps {
   pawn: PawnType;
@@ -54,23 +52,24 @@ export const Pawn = ({
   } else if (isSelected) {
     dynamicBorderClass = 'border-[hsl(var(--highlight-selected-pawn))] border-4 ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))]';
     animationClass = 'scale-105';
-  } else if (isBlocking) {
+  } else if (isBlocking) { // Blocking takes precedence over creating dead zone for border
     dynamicBorderClass = 'border-[hsl(var(--highlight-blocking-pawn-border))] border-4';
   } else if (isCreatingDeadZone) {
     dynamicBorderClass = 'border-[hsl(var(--highlight-creating-dead-zone-pawn-border))] border-4';
   }
 
-  let tooltipContent = `Player ${playerId} Pawn.`;
+  let tooltipContentText = `Player ${playerId} Pawn.`;
+  
   if (isBlocked) {
-    tooltipContent = 'This pawn is BLOCKED. Cannot move or be part of a winning line.';
+    tooltipContentText = 'This pawn is BLOCKED. It cannot move or be part of a winning diagonal.';
   } else if (isBlocking) {
-    tooltipContent = 'This pawn is BLOCKING an opponent. Cannot be used in a winning line.';
-  } else if (isCreatingDeadZone) {
-    tooltipContent = 'This pawn is CREATING a DEAD ZONE. It cannot be used in a winning diagonal and creates a square nearby that your opponent cannot use for winning.';
+    tooltipContentText = 'This pawn is BLOCKING an opponent. It cannot be used in a winning diagonal because it is actively blocking.';
+  } else if (isCreatingDeadZone) { // Tooltip for creating dead zone even if also blocking
+    tooltipContentText = 'This pawn is CREATING a DEAD ZONE. It cannot be used in a winning diagonal. It creates a square (marked with ×) where the opponent cannot place pawns or form winning diagonals through.';
   }
   
   if (isPartOfWinningLine) {
-    tooltipContent = 'Part of the WINNING line!';
+    tooltipContentText = 'Part of the WINNING line!';
   }
   
   const isDraggable = isCurrentPlayerPawn && gamePhase === 'movement' && !winner && !isBlocked;
@@ -109,21 +108,24 @@ export const Pawn = ({
               !isCurrentPlayerPawn && !winner && 'opacity-80', 
               winner && !isPartOfWinningLine && 'opacity-70' 
             )}
-            aria-label={tooltipContent}
-            role="button" 
+            aria-label={tooltipContentText}
+            role="button"
             tabIndex={isDraggable ? 0 : -1}
+            aria-disabled={isBlocked || (!isCurrentPlayerPawn && !winner)}
           >
             <div className={cn(
               "w-6 h-6 md:w-7 md:h-7 rounded-full opacity-30",
               playerId === 1 ? "bg-red-300" : "bg-blue-300" 
             )}></div>
+            
             {isBlocked && <Lock className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
-            {isBlocking && <Shield className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
+            {!isBlocked && isBlocking && <Shield className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
+            {!isBlocked && !isBlocking && isCreatingDeadZone && <Zap className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
           </div>
         </TooltipTrigger>
-        {tooltipContent && (
-          <TooltipContent side="top" align="center" className="bg-popover text-popover-foreground rounded-md px-3 py-1.5 text-sm shadow-md">
-            <p>{tooltipContent}</p>
+        {tooltipContentText && (
+          <TooltipContent side="top" align="center" className="bg-popover text-popover-foreground rounded-md px-3 py-1.5 text-sm shadow-md z-50 max-w-xs">
+            <p>{tooltipContentText}</p>
           </TooltipContent>
         )}
       </Tooltip>
