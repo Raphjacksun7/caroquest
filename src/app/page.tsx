@@ -20,7 +20,8 @@ import { HistoryCard } from '@/components/game/HistoryCard';
 import { RulesDialogContent } from '@/components/game/RulesDialog'; 
 import { WinnerDialog } from '@/components/game/WinnerDialog';
 import { StatusDisplay } from '@/components/game/StatusDisplay';
-import { Toaster, toast } from "@/components/ui/toaster";
+import { Toaster } from "@/components/ui/toaster";
+import { toast } from "@/hooks/use-toast"; // Corrected import
 import { Dialog } from '@/components/ui/dialog';
 
 
@@ -187,3 +188,4 @@ export default function DiagonalDominationPage() {
     </>
   );
 }
+
