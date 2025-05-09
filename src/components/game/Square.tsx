@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { SquareState, GameState, PlayerId } from '@/lib/gameLogic';
@@ -27,7 +28,7 @@ export const Square = ({
   const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, selectedPawnIndex, winningLine } = gameState;
   const [isDragOver, setIsDragOver] = React.useState(false);
 
-  const isDeadZoneForCurrentPlayer = deadZoneSquares.get(index) === currentPlayerId;
+  const isActualDeadZone = deadZoneSquares.has(index); // Check if the square is a dead zone for any player
   const isWinningSquare = winningLine?.includes(index) ?? false;
 
   let squareBgClass = boardColor === 'light' 
@@ -37,7 +38,7 @@ export const Square = ({
   let conditionalClasses = '';
   let hoverInteractionClasses = 'group-hover/board:opacity-90';
 
-  if (isWinningSquare) { // Changed from highlight === 'winningSquare'
+  if (isWinningSquare) {
      squareBgClass = `bg-[hsl(var(--highlight-win-line))] ${boardColor === 'light' ? 'bg-opacity-70' : 'bg-opacity-60'}`;
   } else if (highlight === 'selectedPawn') {
     conditionalClasses = 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))] z-10';
@@ -89,13 +90,13 @@ export const Square = ({
         hoverInteractionClasses,
         isDragOver && highlight === 'validMove' && !pawn && 'ring-2 ring-[hsl(var(--highlight-valid-move))]',
       )}
-      aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isDeadZoneForCurrentPlayer ? ', Dead Zone for you' : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
+      aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isActualDeadZone ? ', Dead Zone' : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
       disabled={!!winner && (!pawn || pawn.playerId !== currentPlayerId) && highlight !== 'selectedPawn'}
     >
-      {isDeadZoneForCurrentPlayer && !pawn && ( 
+      {isActualDeadZone && !pawn && ( 
          <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-50 text-4xl font-bold pointer-events-none select-none">×</div>
       )}
-      {highlight === 'validMove' && !pawn && !isDeadZoneForCurrentPlayer && (
+      {highlight === 'validMove' && !pawn && !isActualDeadZone && (
         <div className={cn(
             "absolute w-3 h-3 rounded-full opacity-70 pointer-events-none select-none",
             isDragOver ? "bg-[hsl(var(--foreground))]" : "bg-[hsl(var(--highlight-valid-move))]"
@@ -110,9 +111,7 @@ export const Square = ({
           onPawnDragStart={onPawnDragStart}
         />
       )}
-      <div className="absolute bottom-0 right-1 text-[0.6rem] md:text-xs opacity-60 pointer-events-none select-none font-mono">
-        {String.fromCharCode(97 + col)}{BOARD_SIZE - row}
-      </div>
+      {/* Algebraic notation removed as per request */}
     </button>
   );
 };
