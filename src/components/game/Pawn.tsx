@@ -25,7 +25,7 @@ export const Pawn = ({
   const { 
     blockedPawnsInfo, 
     blockingPawnsInfo, 
-    deadZoneCreatorPawnsInfo, 
+    deadZoneCreatorPawns, // Changed from deadZoneCreatorPawnsInfo
     winningLine,
     selectedPawnIndex,
     currentPlayerId,
@@ -35,7 +35,7 @@ export const Pawn = ({
 
   const isBlocked = blockedPawnsInfo.has(squareIndex);
   const isBlocking = blockingPawnsInfo.has(squareIndex);
-  const isCreatingDeadZone = deadZoneCreatorPawnsInfo.has(squareIndex);
+  const isCreatingDeadZone = deadZoneCreatorPawns.has(squareIndex); // Changed from deadZoneCreatorPawnsInfo
   const isPartOfWinningLine = winningLine?.includes(squareIndex) ?? false;
   const isSelected = selectedPawnIndex === squareIndex;
   const isCurrentPlayerPawn = playerId === currentPlayerId;
@@ -126,3 +126,4 @@ export const Pawn = ({
     </TooltipProvider>
   );
 };
+
