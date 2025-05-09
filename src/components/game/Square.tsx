@@ -1,4 +1,3 @@
-
 "use client";
 
 import type { SquareState, GameState, PlayerId } from '@/lib/gameLogic';
@@ -25,10 +24,11 @@ export const Square = ({
   onDropOnSquare,
 }: SquareProps) => {
   const { index, row, col, boardColor, pawn, highlight } = squareState;
-  const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, selectedPawnIndex } = gameState;
+  const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, selectedPawnIndex, winningLine } = gameState;
   const [isDragOver, setIsDragOver] = React.useState(false);
 
   const isDeadZoneForCurrentPlayer = deadZoneSquares.get(index) === currentPlayerId;
+  const isWinningSquare = winningLine?.includes(index) ?? false;
 
   let squareBgClass = boardColor === 'light' 
     ? 'bg-[hsl(var(--board-light-square))]' 
@@ -37,7 +37,7 @@ export const Square = ({
   let conditionalClasses = '';
   let hoverInteractionClasses = 'group-hover/board:opacity-90';
 
-  if (highlight === 'winningSquare') {
+  if (isWinningSquare) { // Changed from highlight === 'winningSquare'
      squareBgClass = `bg-[hsl(var(--highlight-win-line))] ${boardColor === 'light' ? 'bg-opacity-70' : 'bg-opacity-60'}`;
   } else if (highlight === 'selectedPawn') {
     conditionalClasses = 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))] z-10';
@@ -116,3 +116,5 @@ export const Square = ({
     </button>
   );
 };
+
+    
