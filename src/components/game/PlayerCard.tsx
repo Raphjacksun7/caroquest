@@ -5,6 +5,7 @@ import type { PlayerId, GameState } from '@/lib/gameLogic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/hooks/useTranslation';
 
 interface PlayerCardProps {
   playerId: PlayerId;
@@ -12,16 +13,23 @@ interface PlayerCardProps {
 }
 
 export const PlayerCard = ({ playerId, gameState }: PlayerCardProps) => {
+  const { t } = useTranslation();
   const { currentPlayerId, playerColors, pawnsToPlace, placedPawns, gamePhase, winner } = gameState;
 
-  const playerName = `Player ${playerId}`;
-  const playerAssignedColorName = playerColors[playerId] === 'light' ? "Light" : "Dark";
+  const playerName = t('player', { id: playerId });
+  
+  const playerAssignedColorName = playerColors[playerId] === 'light' 
+    ? t('lightSquares') 
+    : t('darkSquares');
+  
+  const playerPawnColorName = playerId === 1 ? t('redPawns') : t('bluePawns');
+
   const playerPawnColorVar = playerId === 1 ? '--player1-pawn-color' : '--player2-pawn-color';
   const isCurrent = currentPlayerId === playerId && !winner;
   
   const pawnsInfo = gamePhase === 'placement' 
-    ? `${pawnsToPlace[playerId]} to place`
-    : `${placedPawns[playerId]} on board`;
+    ? t('pawnsToPlace', { count: pawnsToPlace[playerId] })
+    : t('pawnsOnBoard', { count: placedPawns[playerId] });
 
   return (
     <Card className={cn(
@@ -37,22 +45,22 @@ export const PlayerCard = ({ playerId, gameState }: PlayerCardProps) => {
               className="w-6 h-6 rounded-full shadow-inner"
               style={{ backgroundColor: `hsl(var(${playerPawnColorVar}))` }}
             ></div>
-            {playerName} ({playerColors[playerId] === 'light' ? 'Red' : 'Blue'})
+            {playerName} ({playerPawnColorName})
           </div>
           {isCurrent && (
             <Badge variant="outline" className="border-[hsl(var(--primary))] text-[hsl(var(--primary))] animate-pulse px-3 py-1 text-xs">
-              YOUR TURN
+              {t('yourTurn')}
             </Badge>
           )}
         </CardTitle>
-        <CardDescription>Plays on {playerAssignedColorName} squares.</CardDescription>
+        <CardDescription>{t('playsOnColorSquares', { color: playerAssignedColorName.toLowerCase() })}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">{pawnsInfo}</span>
           {winner === playerId && (
             <Badge style={{ backgroundColor: 'hsl(var(--highlight-win-line))', color: 'hsl(var(--foreground))' }} className="font-semibold text-base px-3 py-1">
-              WINNER!
+              {t('winnerExclamation')}
             </Badge>
           )}
         </div>

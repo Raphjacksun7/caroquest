@@ -5,12 +5,14 @@ import type { GameState } from '@/lib/gameLogic';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { History } from 'lucide-react';
 import { BOARD_SIZE } from '@/lib/gameLogic';
+import { useTranslation } from '@/hooks/useTranslation';
 
 interface HistoryCardProps {
   gameState: GameState;
 }
 
 export const HistoryCard = ({ gameState }: HistoryCardProps) => {
+  const { t } = useTranslation();
   const { lastMove, board } = gameState;
 
   if (!lastMove) {
@@ -19,9 +21,9 @@ export const HistoryCard = ({ gameState }: HistoryCardProps) => {
         <CardHeader className="pb-3">
           <CardTitle className="text-xl flex items-center gap-2">
               <History size={20} className="text-[hsl(var(--primary))]"/>
-              Last Move
+              {t('lastMove')}
           </CardTitle>
-          <CardDescription>No moves made yet.</CardDescription>
+          <CardDescription>{t('noMovesYet')}</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -30,26 +32,25 @@ export const HistoryCard = ({ gameState }: HistoryCardProps) => {
   const { from, to } = lastMove;
   const toSquare = board[to];
   const toCoord = `${String.fromCharCode(97 + toSquare.col)}${BOARD_SIZE - toSquare.row}`;
-  const movedPawn = board[to]?.pawn; // Pawn is now at the 'to' location
+  const movedPawn = board[to]?.pawn; 
   
   let actionDescription = "";
   if (movedPawn) {
     const playerPawnColorVar = movedPawn.playerId === 1 ? '--player1-pawn-color' : '--player2-pawn-color';
     if (from === null) { // Placement
-      actionDescription = `Player ${movedPawn.playerId} placed at ${toCoord}`;
+      actionDescription = t('playerPlacedAt', { id: movedPawn.playerId, coord: toCoord });
     } else { // Movement
-      const fromSquare = board[from]; // This square should be empty now
+      const fromSquare = board[from]; 
       const fromCoord = `${String.fromCharCode(97 + fromSquare.col)}${BOARD_SIZE - fromSquare.row}`;
-      actionDescription = `Player ${movedPawn.playerId} moved from ${fromCoord} to ${toCoord}`;
+      actionDescription = t('playerMovedFromTo', { id: movedPawn.playerId, fromCoord, toCoord });
     }
-
 
     return (
       <Card className="shadow-lg">
         <CardHeader className="pb-3">
           <CardTitle className="text-xl flex items-center gap-2">
               <History size={20} className="text-[hsl(var(--primary))]"/>
-              Last Move
+              {t('lastMove')}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -64,5 +65,5 @@ export const HistoryCard = ({ gameState }: HistoryCardProps) => {
       </Card>
     );
   }
-  return null; // Should not happen if lastMove is valid
+  return null; 
 };

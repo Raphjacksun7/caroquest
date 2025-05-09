@@ -1,49 +1,54 @@
 
 "use client";
 
-import type { PlayerId, GamePhase, GameState, SquareState } from '@/lib/gameLogic';
+import type { PlayerId, GamePhase, GameState } from '@/lib/gameLogic';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Swords, Hourglass, Flag, Zap, HelpCircleIcon } from 'lucide-react';
+import { Swords, Hourglass, Flag, Zap } from 'lucide-react';
 import { BOARD_SIZE } from '@/lib/gameLogic';
+import { useTranslation } from '@/hooks/useTranslation';
 
 interface StatusDisplayProps {
-  gamePhase: GamePhase;
-  currentPlayerId: PlayerId;
-  winner: PlayerId | null;
-  selectedPawnIndex: number | null;
-  board: SquareState[];
+  gameState: GameState;
 }
 
-export const StatusDisplay = ({ gamePhase, currentPlayerId, winner, selectedPawnIndex, board }: StatusDisplayProps) => {
+export const StatusDisplay = ({ gameState }: StatusDisplayProps) => {
+  const { t } = useTranslation();
+  const { gamePhase, currentPlayerId, winner, selectedPawnIndex, board, playerColors } = gameState;
+
   let statusText = '';
   let statusDescription = '';
   let IconComponent = Hourglass;
 
   if (winner) {
-    statusText = `Player ${winner} Wins!`;
-    statusDescription = "Congratulations! The game has concluded.";
+    statusText = t('statusPlayerWins', { winner });
+    statusDescription = t('statusCongratulations');
     IconComponent = Flag;
   } else {
-    const playerColorName = currentPlayerId === 1 ? "Red (Light Sq.)" : "Blue (Dark Sq.)";
-    statusText = `Player ${currentPlayerId}'s Turn (${playerColorName})`;
+    const playerColorEnum = playerColors[currentPlayerId];
+    const playerColorName = playerColorEnum === 'light' 
+        ? `${t('redPawns')} (${t('lightSquares')})` 
+        : `${t('bluePawns')} (${t('darkSquares')})`;
+
+    statusText = t('statusPlayerTurn', { currentPlayerId, playerColorName });
     IconComponent = Swords;
 
     switch (gamePhase) {
       case 'placement':
-        statusDescription = 'Place your pawns on your designated color squares.';
+        statusDescription = t('statusPlacementPhase');
         break;
       case 'movement':
         if (selectedPawnIndex !== null) {
           const selectedSquare = board[selectedPawnIndex];
-          statusDescription = `Pawn at ${String.fromCharCode(97 + selectedSquare.col)}${BOARD_SIZE - selectedSquare.row} selected. Move to a valid square.`;
+          const coord = `${String.fromCharCode(97 + selectedSquare.col)}${BOARD_SIZE - selectedSquare.row}`;
+          statusDescription = t('statusMovementPhaseSelected', { coord });
           IconComponent = Zap; 
         } else {
-          statusDescription = 'Select one of your pawns to move, or click and drag.';
+          statusDescription = t('statusMovementPhaseSelect');
         }
         break;
       default:
-        statusDescription = 'Game is loading...';
+        statusDescription = t('statusLoading');
     }
   }
 
