@@ -1,7 +1,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { GameState, PlayerId } from './types'; 
-import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors } from './gameLogic'; // assignPlayerColors added
+import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors } from './gameLogic'; 
 
 export interface StoredPlayer {
   id: string; // Socket ID
@@ -12,8 +12,8 @@ export interface GameOptions {
   isPublic?: boolean; 
   gameIdToCreate?: string;
   pawnsPerPlayer?: number;
-  isMatchmaking?: boolean; // Retained for potential future use with in-memory matchmaking
-  isRanked?: boolean;      // Retained for potential future use
+  isMatchmaking?: boolean; 
+  isRanked?: boolean;      
 }
 interface GameData {
   id: string;
@@ -21,7 +21,8 @@ interface GameData {
   players: StoredPlayer[];
   lastActivity: number;
   options: GameOptions; 
-  sequenceId: number; // For delta updates
+  sequenceId: number; 
+  createdAt: Date; // Added createdAt property
 }
 
 export class GameStore {
@@ -36,7 +37,7 @@ export class GameStore {
   }
 
   private startCleanupInterval(): void {
-    if (this.cleanupInterval) clearInterval(this.cleanupInterval); // Clear existing interval if any
+    if (this.cleanupInterval) clearInterval(this.cleanupInterval); 
     this.cleanupInterval = setInterval(() => {
       const now = Date.now();
       this.inMemoryGames.forEach((game, gameId) => {
@@ -59,7 +60,8 @@ export class GameStore {
       players: [{ id: creatorSocketId, name: creatorName, playerId: 1 as PlayerId }],
       lastActivity: Date.now(),
       options,
-      sequenceId: 0
+      sequenceId: 0,
+      createdAt: new Date(),
     };
     
     this.inMemoryGames.set(gameId, gameData);
@@ -69,6 +71,7 @@ export class GameStore {
   
   private hydrateGameState(state: GameState): GameState {
     // Ensure complex types are correctly instantiated if they were stringified/parsed
+    // This is more relevant if state comes from a non-memory source like JSON.parse
     return {
       ...state,
       playerColors: state.playerColors || assignPlayerColors(),
@@ -85,9 +88,14 @@ export class GameStore {
     const gameData = this.inMemoryGames.get(gameId);
     if (!gameData) return null;
 
-    // Return a deep copy to prevent direct mutation of stored state
+    // For in-memory, direct mutation is possible but usually avoided by returning copies.
+    // Since we hydrate complex types, let's ensure the stored state is also hydrated for consistency.
+    // However, for simple get, a deep copy is safer if the caller might mutate.
+    // For internal use where we control mutation, returning the reference is fine if performance is key.
+    // For now, let's assume internal use might modify, so a copy is safer.
     const deepCopiedGameData = JSON.parse(JSON.stringify(gameData)) as GameData;
     deepCopiedGameData.state = this.hydrateGameState(deepCopiedGameData.state);
+    deepCopiedGameData.createdAt = new Date(gameData.createdAt); // Ensure createdAt is a Date object
     return deepCopiedGameData;
   }
   
@@ -97,12 +105,9 @@ export class GameStore {
       console.warn(`GameStore (in-memory): Attempted to update non-existent game: ${gameId}`);
       return false;
     }
-    // Game state from gameLogic functions should already be a new object.
-    // We hydrate it here to ensure Sets/Maps are correctly formed before storing.
     game.state = this.hydrateGameState(state); 
     game.lastActivity = Date.now();
     game.sequenceId++;
-    // No need to call this.inMemoryGames.set(gameId, game) as `game` is a reference to the object in the map.
     return true;
   }
   
@@ -112,8 +117,7 @@ export class GameStore {
     
     const existingPlayer = gameData.players.find(p => p.id === socketId);
     if (existingPlayer) { 
-      // Player is rejoining
-      existingPlayer.name = playerName; // Update name if changed
+      existingPlayer.name = playerName; 
       gameData.lastActivity = Date.now();
       return { success: true, assignedPlayerId: existingPlayer.playerId, existingPlayers: gameData.players };
     }
@@ -155,7 +159,7 @@ export class GameStore {
     let count = 0;
     
     const sortedGames = Array.from(this.inMemoryGames.values())
-      .sort((a,b) => b.lastActivity - a.lastActivity); // Sort by most recent activity
+      .sort((a,b) => b.lastActivity - a.lastActivity); 
 
     for (const game of sortedGames) {
       if (game.options?.isPublic && game.players.length < 2) {
@@ -163,7 +167,7 @@ export class GameStore {
           id: game.id,
           createdBy: game.players[0]?.name || 'Unknown',
           playerCount: game.players.length,
-          created: game.createdAt, // Use createdAt for listing
+          created: game.createdAt.toISOString(), // Use ISO string for JSON compatibility
           options: game.options,
         });
         count++;
