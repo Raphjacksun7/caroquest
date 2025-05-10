@@ -6,11 +6,11 @@ import {
   createInitialGameState, 
   placePawn, 
   movePawn, 
-  selectPawn, 
-  clearHighlights as clearSelectionLogic, // Renamed to avoid conflict
+  highlightValidMoves, 
+  clearHighlights as clearSelectionLogic,
   PAWNS_PER_PLAYER
 } from '@/lib/gameLogic';
-import type { Action as AIAction } from '@/lib/ai/mcts'; // Assuming Action type is exported from MCTS
+import type { AIAction } from '@/lib/ai/mcts';
 
 import { GameBoard } from '@/components/game/GameBoard';
 import { PlayerCard } from '@/components/game/PlayerCard';
@@ -20,7 +20,7 @@ import { RulesDialog } from '@/components/game/RulesDialog';
 import { WinnerDialog } from '@/components/game/WinnerDialog';
 import { StatusDisplay } from '@/components/game/StatusDisplay';
 import { Toaster } from "@/components/ui/toaster";
-import { useToast } from "@/hooks/use-toast"; // Corrected import
+import { useToast } from "@/hooks/use-toast";
 import { Dialog } from '@/components/ui/dialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useGameConnection, type PlayerInfo as RemotePlayerInfo, useGameStore } from '@/hooks/useGameConnection';
@@ -33,6 +33,8 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Bot, Users, Wifi, Copy, LinkIcon, Home } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
 
 type GameMode = 'ai' | 'local' | 'remote' | 'select';
 type AIDifficulty = 'easy' | 'medium' | 'hard';
@@ -40,14 +42,14 @@ type AIDifficulty = 'easy' | 'medium' | 'hard';
 export function StrategicPawnsGame() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const pathParams = useParams(); // For game/[gameId] route
+  const pathParams = useParams(); 
 
   const [localGameState, setLocalGameState] = useState<GameState>(() => createInitialGameState(PAWNS_PER_PLAYER));
   const [gameMode, setGameMode] = useState<GameMode>('select');
   
   const [player1Name, setPlayer1Name] = useState('Player 1');
-  const [player2Name, setPlayer2Name] = useState('Player 2'); // For local mode
-  const [remotePlayerName, setRemotePlayerName] = useState(''); // For remote mode
+  const [player2Name, setPlayer2Name] = useState('Player 2'); 
+  const [remotePlayerName, setRemotePlayerName] = useState(''); 
   const [remoteGameIdInput, setRemoteGameIdInput] = useState('');
   
   const {
@@ -72,25 +74,21 @@ export function StrategicPawnsGame() {
   const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>('medium');
   const { calculateBestMove, isLoading: isAILoading, error: aiError } = useAI(aiDifficulty);
 
-  // Effect to handle game ID from URL for remote games
+
   useEffect(() => {
     const gameIdFromPath = Array.isArray(pathParams?.gameId) ? pathParams.gameId[0] : pathParams?.gameId;
     if (gameIdFromPath && gameIdFromPath !== 'local' && gameIdFromPath !== 'ai' && gameMode === 'select') {
       setGameMode('remote');
       setRemoteGameIdInput(gameIdFromPath);
-      // Auto-join if name is available (e.g., from query params or localStorage)
       const nameFromQuery = searchParams.get('playerName');
       if (nameFromQuery) {
         setRemotePlayerName(nameFromQuery);
         if(isConnected && !connectedGameId) joinRemoteGame(gameIdFromPath, nameFromQuery);
       } else {
-        // Prompt for name or use a default to join
-        const storedName = localStorage.getItem('playerName');
+        const storedName = typeof window !== 'undefined' ? localStorage.getItem('playerName') : null;
         if (storedName) {
             setRemotePlayerName(storedName);
             if(isConnected && !connectedGameId) joinRemoteGame(gameIdFromPath, storedName);
-        } else {
-            // Could show a modal to ask for player name here before joining
         }
       }
     }
@@ -103,14 +101,14 @@ export function StrategicPawnsGame() {
   const p1DisplayName = gameMode === 'remote' ? remotePlayers.find(p => p.playerId === 1)?.name || t('player', { id: 1 }) : player1Name;
   const p2DisplayName = gameMode === 'remote' ? remotePlayers.find(p => p.playerId === 2)?.name || t('player', { id: 2 }) : (gameMode === 'ai' ? t('aiOpponent') : player2Name);
 
-  // AI Move Logic
   useEffect(() => {
-    if (gameMode === 'ai' && localGameState.currentPlayerId === 2 && !localGameState.winner && !isAILoading) {
+    if (gameMode === 'ai' && localGameState?.currentPlayerId === 2 && !localGameState?.winner && !isAILoading) {
       const makeAIMove = async () => {
-        // Pass a structured clone to ensure AI doesn't mutate the main state accidentally
+        if(!localGameState) return; // Ensure localGameState is not null
         const clonedState = structuredClone(localGameState);
         const aiAction = await calculateBestMove(clonedState);
-        if (aiAction) {
+        
+        if (aiAction && localGameState) { // Re-check localGameState in case it became null
           let nextState: GameState | null = null;
           if (aiAction.type === 'place' && aiAction.squareIndex !== undefined) {
             nextState = placePawn(localGameState, aiAction.squareIndex);
@@ -121,12 +119,11 @@ export function StrategicPawnsGame() {
           else console.error("AI made an invalid or null move:", aiAction);
         }
       };
-      const timeoutId = setTimeout(makeAIMove, 700); // AI "thinking" time
+      const timeoutId = setTimeout(makeAIMove, 700); 
       return () => clearTimeout(timeoutId);
     }
   }, [gameMode, localGameState, calculateBestMove, isAILoading, aiDifficulty]);
 
-  // Error Toasts
   useEffect(() => {
     if (gameConnectionError) {
       toast({ title: t('errorTitle'), description: gameConnectionError, variant: "destructive" });
@@ -137,7 +134,6 @@ export function StrategicPawnsGame() {
     }
   }, [gameConnectionError, aiError, toast, t, clearRemoteError]);
 
-  // Winner Toast
   useEffect(() => {
     if (activeGameState?.winner) {
       const winnerInfo = activeGameState.winner === 1 ? p1DisplayName : p2DisplayName;
@@ -155,7 +151,7 @@ export function StrategicPawnsGame() {
     if (localGameState.gamePhase === 'placement') {
       newState = placePawn(localGameState, index);
       if (!newState) toast({ title: t('invalidPlacement'), description: t('invalidPlacementDescription'), variant: "destructive" });
-    } else { // Movement
+    } else { 
       if (localGameState.selectedPawnIndex === null) {
         if (square.pawn && square.pawn.playerId === localGameState.currentPlayerId && !localGameState.blockedPawnsInfo.has(index)) {
           newState = highlightValidMoves(localGameState, index);
@@ -187,20 +183,20 @@ export function StrategicPawnsGame() {
     const square = remoteSocketGameState.board[index];
     if (remoteSocketGameState.gamePhase === 'placement') {
       remotePlacePawn(index);
-    } else { // Movement
-      if (remoteSocketGameState.selectedPawnIndex === null) {
+    } else { 
+      if (remoteSocketGameState.selectedPawnIndex === null) { 
         if (square.pawn && square.pawn.playerId === remoteLocalPlayerId && !remoteSocketGameState.blockedPawnsInfo.has(index)) {
           const tempState = highlightValidMoves(remoteSocketGameState, index);
           useGameStore.getState().setGameState(tempState); 
         } else if (square.pawn && remoteSocketGameState.blockedPawnsInfo.has(index)) {
           toast({ title: t('pawnBlocked'), description: t('pawnBlockedDescription'), variant: "destructive" });
         }
-      } else {
-        if (remoteSocketGameState.selectedPawnIndex === index) {
-          const tempState = clearSelectionLogic(remoteSocketGameState);
-          useGameStore.getState().setGameState(tempState);
+      } else { 
+        if (remoteSocketGameState.selectedPawnIndex === index) { 
+            const tempState = clearSelectionLogic(remoteSocketGameState);
+            useGameStore.getState().setGameState(tempState);
         } else if (square.highlight === 'validMove') {
-          remoteMovePawn(remoteSocketGameState.selectedPawnIndex, index);
+            remoteMovePawn(remoteSocketGameState.selectedPawnIndex, index);
         } else if (square.pawn && square.pawn.playerId === remoteLocalPlayerId && !remoteSocketGameState.blockedPawnsInfo.has(index)) {
            const tempState = highlightValidMoves(remoteSocketGameState, index);
            useGameStore.getState().setGameState(tempState);
@@ -217,7 +213,6 @@ export function StrategicPawnsGame() {
   const resetGameHandler = useCallback(() => {
     if (gameMode === 'remote') {
       toast({ title: t('gameReset'), description: t('featureNotAvailableRemote') });
-      // Potentially add a "propose reset" socket event
     } else {
       setLocalGameState(createInitialGameState(PAWNS_PER_PLAYER));
       toast({ title: t('gameReset'), description: t('gameResetDescription') });
@@ -232,16 +227,16 @@ export function StrategicPawnsGame() {
     if (activeGameState.gamePhase !== 'movement' || activeGameState.blockedPawnsInfo.has(pawnIndex)) return;
     
     const highlightedState = highlightValidMoves(activeGameState, pawnIndex);
-    if (gameMode === 'remote') useGameStore.getState().setGameState(highlightedState);
-    else setLocalGameState(highlightedState);
-  }, [activeGameState, activeLocalPlayerId, remoteLocalPlayerId, gameMode]);
+    if (gameMode === 'remote' && remoteSocketGameState) useGameStore.getState().setGameState(highlightedState);
+    else if (localGameState) setLocalGameState(highlightedState);
+  }, [activeGameState, activeLocalPlayerId, remoteLocalPlayerId, gameMode, localGameState, remoteSocketGameState]);
 
   const handlePawnDrop = useCallback((targetIndex: number) => {
     if (!activeGameState || activeGameState.selectedPawnIndex === null) {
       if(activeGameState) {
         const clearedState = clearSelectionLogic(activeGameState);
-        if (gameMode === 'remote') useGameStore.getState().setGameState(clearedState);
-        else setLocalGameState(clearedState);
+        if (gameMode === 'remote' && remoteSocketGameState) useGameStore.getState().setGameState(clearedState);
+        else if (localGameState) setLocalGameState(clearedState);
       }
       return;
     }
@@ -250,31 +245,31 @@ export function StrategicPawnsGame() {
     if (targetSquare.highlight === 'validMove') {
         if (gameMode === 'remote') {
             remoteMovePawn(activeGameState.selectedPawnIndex, targetIndex);
-        } else {
-            const newState = movePawn(activeGameState, activeGameState.selectedPawnIndex, targetIndex);
+        } else if (localGameState) {
+            const newState = movePawn(localGameState, activeGameState.selectedPawnIndex, targetIndex);
             if (newState) setLocalGameState(newState);
         }
     } else {
         toast({ title: t('invalidDrop'), description: t('invalidDropDescription'), variant: "destructive" });
         const clearedState = clearSelectionLogic(activeGameState); 
-        if (gameMode === 'remote') useGameStore.getState().setGameState(clearedState);
-        else setLocalGameState(clearedState);
+        if (gameMode === 'remote' && remoteSocketGameState) useGameStore.getState().setGameState(clearedState);
+        else if (localGameState) setLocalGameState(clearedState);
     }
-  }, [activeGameState, gameMode, remoteMovePawn, toast, t]);
-
+  }, [activeGameState, gameMode, remoteMovePawn, toast, t, localGameState, remoteSocketGameState]);
 
   const handleStartGameMode = (mode: GameMode) => {
-    resetGameHandler(); // Reset local state before switching
+    resetGameHandler(); 
     if (mode === 'remote') {
         if (!remotePlayerName.trim()) {
             toast({ title: t('errorTitle'), description: t('playerNameRequired'), variant: "destructive"});
             return;
         }
-        localStorage.setItem('playerName', remotePlayerName.trim());
-        if(remoteGameIdInput.trim()){ // Join game
+        if (typeof window !== 'undefined') localStorage.setItem('playerName', remotePlayerName.trim());
+        
+        if(remoteGameIdInput.trim()){ 
             if (isConnected) joinRemoteGame(remoteGameIdInput.trim(), remotePlayerName.trim());
             else toast({title: t('errorTitle'), description: "Not connected to server.", variant: "destructive"});
-        } else { // Create game
+        } else { 
             if (isConnected) createRemoteGame(remotePlayerName.trim());
             else toast({title: t('errorTitle'), description: "Not connected to server.", variant: "destructive"});
         }
@@ -287,7 +282,6 @@ export function StrategicPawnsGame() {
         router.push(`/game/${connectedGameId}?playerName=${encodeURIComponent(remotePlayerName)}`);
     }
   }, [gameMode, connectedGameId, remotePlayerName, router, pathParams]);
-
 
   if (gameMode === 'select') {
     return (
@@ -369,7 +363,12 @@ export function StrategicPawnsGame() {
             {gameMode === 'remote' && connectedGameId && 
               <div className="flex items-center justify-center gap-2 mt-1">
                 <p className="text-sm text-muted-foreground">{t('gameRoomID')}: {connectedGameId}</p>
-                <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/game/${connectedGameId}`).then(()=>toast({title: t('linkCopiedTitle')}))}>
+                <Button variant="outline" size="sm" onClick={() => {
+                    if (typeof window !== 'undefined') {
+                        navigator.clipboard.writeText(`${window.location.origin}/game/${connectedGameId}`)
+                            .then(()=>toast({title: t('linkCopiedTitle')}));
+                    }
+                }}>
                     <LinkIcon className="mr-1 h-3 w-3"/> {t('copyGameLink')}
                 </Button>
               </div>
