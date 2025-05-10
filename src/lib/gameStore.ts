@@ -1,10 +1,10 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { GameState, PlayerId } from './types'; 
-import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors } from './gameLogic';
+import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors } from './gameLogic'; // assignPlayerColors added
 
 export interface StoredPlayer {
-  id: string; 
+  id: string; // Socket ID
   name: string;
   playerId: PlayerId; 
 }
@@ -12,8 +12,8 @@ export interface GameOptions {
   isPublic?: boolean; 
   gameIdToCreate?: string;
   pawnsPerPlayer?: number;
-  isMatchmaking?: boolean;
-  isRanked?: boolean;
+  isMatchmaking?: boolean; // Retained for potential future use with in-memory matchmaking
+  isRanked?: boolean;      // Retained for potential future use
 }
 interface GameData {
   id: string;
@@ -21,22 +21,22 @@ interface GameData {
   players: StoredPlayer[];
   lastActivity: number;
   options: GameOptions; 
-  sequenceId: number;
+  sequenceId: number; // For delta updates
 }
 
 export class GameStore {
   private inMemoryGames: Map<string, GameData>;
-  private readonly publicGamesKey = 'public_games'; // Still used for identifying public games in memory
   private readonly gameTTLMs = 3600 * 24 * 1000; // 24 hours in milliseconds for in-memory cleanup
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     this.inMemoryGames = new Map<string, GameData>();
-    console.warn('GameStore: Using in-memory store. Game data will not persist across server restarts and is not suitable for multi-instance deployments.');
+    console.log('GameStore: Initialized in-memory store.');
     this.startCleanupInterval();
   }
 
   private startCleanupInterval(): void {
+    if (this.cleanupInterval) clearInterval(this.cleanupInterval); // Clear existing interval if any
     this.cleanupInterval = setInterval(() => {
       const now = Date.now();
       this.inMemoryGames.forEach((game, gameId) => {
@@ -63,36 +63,32 @@ export class GameStore {
     };
     
     this.inMemoryGames.set(gameId, gameData);
-    console.log(`GameStore (in-memory): Created game ${gameId}`);
+    console.log(`GameStore (in-memory): Created game ${gameId} for ${creatorName}`);
     return gameId;
   }
   
-  async getGame(gameId: string): Promise<GameData | null> {
-    const gameData = this.inMemoryGames.get(gameId);
-    // Return a deep copy to prevent direct mutation of stored state
-    return gameData ? this.hydrateGameData(JSON.parse(JSON.stringify(gameData))) : null;
+  private hydrateGameState(state: GameState): GameState {
+    // Ensure complex types are correctly instantiated if they were stringified/parsed
+    return {
+      ...state,
+      playerColors: state.playerColors || assignPlayerColors(),
+      blockedPawnsInfo: new Set(Array.from(state.blockedPawnsInfo || [])),
+      blockingPawnsInfo: new Set(Array.from(state.blockingPawnsInfo || [])),
+      deadZoneSquares: new Map((Array.isArray(state.deadZoneSquares) ? state.deadZoneSquares : Object.entries(state.deadZoneSquares || {})).map(([k,v]:[string, PlayerId]) => [parseInt(k),v])),
+      deadZoneCreatorPawnsInfo: new Set(Array.from(state.deadZoneCreatorPawnsInfo || [])),
+      pawnsToPlace: state.pawnsToPlace || { 1: PAWNS_PER_PLAYER, 2: PAWNS_PER_PLAYER },
+      placedPawns: state.placedPawns || { 1:0, 2:0 }
+    };
   }
 
-  private hydrateGameData(gameData: GameData): GameData {
-    // Rehydrate Sets and Maps that might have been lost in JSON stringification
-    // Ensure playerColors exists if it was not part of the stored gameData
-    gameData.state.playerColors = gameData.state.playerColors || assignPlayerColors();
-    if (gameData.state.blockedPawnsInfo && !(gameData.state.blockedPawnsInfo instanceof Set)) {
-      gameData.state.blockedPawnsInfo = new Set(Array.from(gameData.state.blockedPawnsInfo || []));
-    }
-    if (gameData.state.blockingPawnsInfo && !(gameData.state.blockingPawnsInfo instanceof Set)) {
-      gameData.state.blockingPawnsInfo = new Set(Array.from(gameData.state.blockingPawnsInfo || []));
-    }
-    if (gameData.state.deadZoneSquares && !(gameData.state.deadZoneSquares instanceof Map)) {
-      const deadZoneEntries = Array.isArray(gameData.state.deadZoneSquares) 
-        ? gameData.state.deadZoneSquares 
-        : Object.entries(gameData.state.deadZoneSquares || {});
-      gameData.state.deadZoneSquares = new Map(deadZoneEntries.map(([k,v]: [string, PlayerId]) => [parseInt(k), v]));
-    }
-    if (gameData.state.deadZoneCreatorPawnsInfo && !(gameData.state.deadZoneCreatorPawnsInfo instanceof Set)) {
-      gameData.state.deadZoneCreatorPawnsInfo = new Set(Array.from(gameData.state.deadZoneCreatorPawnsInfo || []));
-    }
-    return gameData;
+  async getGame(gameId: string): Promise<GameData | null> {
+    const gameData = this.inMemoryGames.get(gameId);
+    if (!gameData) return null;
+
+    // Return a deep copy to prevent direct mutation of stored state
+    const deepCopiedGameData = JSON.parse(JSON.stringify(gameData)) as GameData;
+    deepCopiedGameData.state = this.hydrateGameState(deepCopiedGameData.state);
+    return deepCopiedGameData;
   }
   
   async updateGameState(gameId: string, state: GameState): Promise<boolean> {
@@ -101,9 +97,12 @@ export class GameStore {
       console.warn(`GameStore (in-memory): Attempted to update non-existent game: ${gameId}`);
       return false;
     }
-    game.state = state; // State should already be a new object from gameLogic
+    // Game state from gameLogic functions should already be a new object.
+    // We hydrate it here to ensure Sets/Maps are correctly formed before storing.
+    game.state = this.hydrateGameState(state); 
     game.lastActivity = Date.now();
     game.sequenceId++;
+    // No need to call this.inMemoryGames.set(gameId, game) as `game` is a reference to the object in the map.
     return true;
   }
   
@@ -113,6 +112,9 @@ export class GameStore {
     
     const existingPlayer = gameData.players.find(p => p.id === socketId);
     if (existingPlayer) { 
+      // Player is rejoining
+      existingPlayer.name = playerName; // Update name if changed
+      gameData.lastActivity = Date.now();
       return { success: true, assignedPlayerId: existingPlayer.playerId, existingPlayers: gameData.players };
     }
 
@@ -120,7 +122,7 @@ export class GameStore {
       return { success: false, error: 'Game is full.' };
     }
     
-    const assignedPlayerId = (gameData.players.length === 0 ? 1 : 2) as PlayerId; 
+    const assignedPlayerId = (gameData.players[0]?.playerId === 1 ? 2 : 1) as PlayerId; 
     gameData.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId });
     gameData.lastActivity = Date.now();
     
@@ -143,7 +145,7 @@ export class GameStore {
     game.lastActivity = Date.now();
 
     if (game.players.length === 0) {
-      this.deleteGame(gameId); // No Redis zrem needed
+      this.deleteGame(gameId);
     }
     return removedPlayer;
   }
@@ -151,23 +153,23 @@ export class GameStore {
   async getPublicGames(limit = 10): Promise<any[] | { error: string }> {
     const publicGamesData: any[] = [];
     let count = 0;
-    // Iterate in reverse order of insertion (approximates newest first for Map)
-    const gameEntries = Array.from(this.inMemoryGames.entries()).reverse();
+    
+    const sortedGames = Array.from(this.inMemoryGames.values())
+      .sort((a,b) => b.lastActivity - a.lastActivity); // Sort by most recent activity
 
-    for (const [gameId, game] of gameEntries) {
+    for (const game of sortedGames) {
       if (game.options?.isPublic && game.players.length < 2) {
         publicGamesData.push({
           id: game.id,
           createdBy: game.players[0]?.name || 'Unknown',
           playerCount: game.players.length,
-          created: game.lastActivity, // Use lastActivity as creation proxy
+          created: game.createdAt, // Use createdAt for listing
           options: game.options,
         });
         count++;
         if (count >= limit) break;
       }
     }
-    // Already sorted by "newest" (lastActivity) effectively due to reverse iteration
     return publicGamesData;
   }
 
