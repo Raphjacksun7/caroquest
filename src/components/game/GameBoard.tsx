@@ -1,10 +1,9 @@
-
 "use client";
 
 import type { GameState, SquareState } from '@/lib/gameLogic';
 import { Square } from './Square';
 import { BOARD_SIZE } from '@/lib/gameLogic';
-import React from 'react';
+import React from 'react'; // Removed useState, useEffect as they weren't used here
 
 interface GameBoardProps {
   gameState: GameState;
@@ -19,7 +18,7 @@ export const GameBoard = ({
   onPawnDragStart,
   onPawnDrop,
 }: GameBoardProps) => {
-  const { board, selectedPawnIndex } = gameState;
+  const { board } = gameState;
 
   const handleDragOverSquare = (e: React.DragEvent<HTMLDivElement>, squareIndex: number) => {
     e.preventDefault(); 
@@ -41,15 +40,15 @@ export const GameBoard = ({
       className="grid grid-cols-8 gap-0 border-2 border-[hsl(var(--border))] bg-[hsl(var(--background))] shadow-2xl rounded-lg overflow-hidden"
       style={{ width: `${BOARD_SIZE * 3.75}rem`, height: `${BOARD_SIZE * 3.75}rem` }}
     >
-      {board.map((squareState: SquareState, index: number) => (
+      {board.map((squareState: SquareState) => ( // Removed index from map as squareState.index is used
         <Square
-          key={index}
+          key={squareState.index}
           squareState={squareState}
           gameState={gameState}
-          onClick={() => onSquareClick(index)}
+          onClick={() => onSquareClick(squareState.index)}
           onPawnDragStart={onPawnDragStart}
-          onDragOverSquare={(e) => handleDragOverSquare(e, index)}
-          onDropOnSquare={(e) => handleDropOnSquare(e, index)}
+          onDragOverSquare={(e) => handleDragOverSquare(e, squareState.index)}
+          onDropOnSquare={(e) => handleDropOnSquare(e, squareState.index)}
         />
       ))}
     </div>

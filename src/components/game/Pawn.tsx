@@ -4,7 +4,8 @@ import type { Pawn as PawnType, GameState } from '@/lib/gameLogic';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import React from 'react';
-import { Lock, Shield, Zap } from 'lucide-react'; // Added Zap
+import { Lock, Shield, Zap } from 'lucide-react';
+
 
 interface PawnProps {
   pawn: PawnType;
@@ -23,7 +24,7 @@ export const Pawn = ({
   const { 
     blockedPawnsInfo, 
     blockingPawnsInfo, 
-    deadZoneCreatorPawnsInfo, // This is the field name from GameState in gameLogic.ts
+    deadZoneCreatorPawnsInfo, 
     winningLine,
     selectedPawnIndex,
     currentPlayerId,
@@ -31,14 +32,9 @@ export const Pawn = ({
     winner
   } = gameState;
 
-  // Defensive check: Ensure deadZoneCreatorPawnsInfo is a Set before calling .has()
-  const isCreatingDeadZone = deadZoneCreatorPawnsInfo instanceof Set 
-                            ? deadZoneCreatorPawnsInfo.has(squareIndex) 
-                            : false;
-                            
-  const isBlocked = blockedPawnsInfo instanceof Set ? blockedPawnsInfo.has(squareIndex) : false;
-  const isBlocking = blockingPawnsInfo instanceof Set ? blockingPawnsInfo.has(squareIndex) : false;
-  
+  const isBlocked = blockedPawnsInfo.has(squareIndex);
+  const isBlocking = blockingPawnsInfo.has(squareIndex);
+  const isCreatingDeadZone = deadZoneCreatorPawnsInfo.has(squareIndex);
   const isPartOfWinningLine = winningLine?.includes(squareIndex) ?? false;
   const isSelected = selectedPawnIndex === squareIndex;
   const isCurrentPlayerPawn = playerId === currentPlayerId;
@@ -57,10 +53,10 @@ export const Pawn = ({
   } else if (isSelected) {
     dynamicBorderClass = 'border-[hsl(var(--highlight-selected-pawn))] border-4 ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))]';
     animationClass = 'scale-105';
-  } else if (isBlocking && !isCreatingDeadZone) { // Prioritize creating dead zone icon if applicable
-    dynamicBorderClass = 'border-[hsl(var(--highlight-blocking-pawn-border))] border-4';
-  } else if (isCreatingDeadZone) {
+  } else if (isCreatingDeadZone) { // Prioritize creating dead zone icon if applicable
     dynamicBorderClass = 'border-[hsl(var(--highlight-creating-dead-zone-pawn-border))] border-4';
+  } else if (isBlocking) { 
+    dynamicBorderClass = 'border-[hsl(var(--highlight-blocking-pawn-border))] border-4';
   }
 
 
@@ -89,8 +85,8 @@ export const Pawn = ({
   };
 
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
+    <TooltipProvider>
+      <Tooltip delayDuration={200}>
         <TooltipTrigger asChild>
           <div
             draggable={isDraggable}
@@ -116,9 +112,9 @@ export const Pawn = ({
               playerId === 1 ? "bg-red-300" : "bg-blue-300" 
             )}></div>
             
-            {isBlocked && <Lock className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
-            {isCreatingDeadZone && <Zap className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
-            {isBlocking && !isCreatingDeadZone && <Shield className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
+            {isBlocked && <Lock size={16} className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
+            {isCreatingDeadZone && <Zap size={16} className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
+            {isBlocking && !isCreatingDeadZone && <Shield size={16} className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
           </div>
         </TooltipTrigger>
         {tooltipContent && (
@@ -126,7 +122,7 @@ export const Pawn = ({
             <p>{tooltipContent}</p>
           </TooltipContent>
         )}
-      </TooltipProvider>
+      </Tooltip>
+    </TooltipProvider>
   );
 };
-    
