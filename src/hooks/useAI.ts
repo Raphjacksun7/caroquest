@@ -8,12 +8,10 @@ const workerCache = new Map<string, Worker>();
 
 function createNewAIWorker(): Worker | null {
   if (typeof window === 'undefined') {
-    // Worker can only be created on the client side
     return null;
   }
-  // Web workers in the 'public' directory are served from the root.
-  // The path should be relative to the public directory root.
-  return new Worker('/workers/mcts-worker.js', { type: 'module' });
+  // Updated path as per user suggestion
+  return new Worker(new URL('../../public/workers/mcts-worker.js', import.meta.url), { type: 'module' });
 }
 
 export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
@@ -26,6 +24,7 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     setIsLoading(true);
     setError(null);
 
+    // Attempt to get from cache or create new
     let workerInstance = workerCache.get(difficulty);
     if (!workerInstance) {
       try {
@@ -33,16 +32,14 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
         if (workerInstance) {
           workerCache.set(difficulty, workerInstance);
         } else {
-          // This case should ideally not be hit if called client-side,
-          // but as a fallback:
-          console.error("Failed to create AI worker: not in a browser environment.");
-          setError("AI worker can only be created in the browser.");
+          console.error("Failed to create AI worker: not in a browser environment or worker path incorrect.");
+          setError("AI worker is not available or path is incorrect.");
           setIsLoading(false);
           return;
         }
       } catch (e: any) {
-        console.error("Failed to create AI worker:", e);
-        setError(`Failed to initialize AI worker: ${e.message}`);
+        console.error("Failed to create AI worker (exception):", e);
+        setError(`Failed to initialize AI worker: ${e.message}. Check worker path and server logs.`);
         setIsLoading(false);
         return;
       }
@@ -57,19 +54,19 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
           console.error("AI Worker Error from message:", event.data.error);
           currentMovePromiseRef.current.reject(new Error(event.data.error));
         } else if (event.data.type === 'MOVE_CALCULATED' && event.data.move === undefined) { 
-          currentMovePromiseRef.current.resolve(null); // AI might not find a move
+          currentMovePromiseRef.current.resolve(null); 
         } else {
           console.warn('Unexpected message from AI worker:', event.data);
           currentMovePromiseRef.current.reject(new Error('Unexpected message from AI worker'));
         }
         currentMovePromiseRef.current = null;
       }
-      setIsLoading(false); // AI processing finished
+      setIsLoading(false);
     };
 
     const handleError = (err: ErrorEvent) => {
       console.error('AI Worker onerror:', err);
-      const errorMessage = `AI Worker failed: ${err.message || 'Unknown error'}`;
+      const errorMessage = `AI Worker failed: ${err.message || 'Unknown error'}. Ensure worker file exists at the correct public path.`;
       setError(errorMessage);
       setIsLoading(false);
       if (currentMovePromiseRef.current) {
@@ -79,20 +76,19 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     };
 
     if (workerInstance) {
-        // Simulate async loading for consistency, even if worker is cached
-        // This helps manage the isLoading state more predictably.
         const timerId = setTimeout(() => setIsLoading(false), 50); 
         workerInstance.addEventListener('message', handleMessage);
         workerInstance.addEventListener('error', handleError);
         
-        // Cleanup function for this effect
         return () => {
           clearTimeout(timerId);
+          // Do not terminate cached workers here, or manage lifecycle differently
+          // For simplicity, let's assume workers are reused and not terminated per-hook instance
           workerInstance?.removeEventListener('message', handleMessage);
           workerInstance?.removeEventListener('error', handleError);
           
           if (currentMovePromiseRef.current) {
-            currentMovePromiseRef.current.reject(new Error("AI calculation cancelled due to component unmount or difficulty change."));
+            currentMovePromiseRef.current.reject(new Error("AI calculation cancelled."));
             currentMovePromiseRef.current = null;
           }
         };
@@ -110,8 +106,6 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     }
     
     if (currentMovePromiseRef.current) {
-      // If a calculation is already in progress, reject the old one.
-      // This might happen if the user triggers a new AI move quickly.
       currentMovePromiseRef.current.reject(new Error("New AI move calculation started before the previous one finished."));
       currentMovePromiseRef.current = null;
     }
@@ -122,9 +116,6 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     return new Promise((resolve, reject) => {
       currentMovePromiseRef.current = { resolve, reject };
       try {
-        // Ensure GameState is properly cloned before sending to worker,
-        // especially if it contains complex objects like Sets or Maps.
-        // The worker itself also does a structuredClone, but it's good practice here too.
         const stateToSend = structuredClone(gameState);
         aiWorker.postMessage({ gameState: stateToSend, difficulty });
       } catch (e: any) {
@@ -132,7 +123,7 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
         console.error("Error posting message to AI worker:", errMessage);
         setError(errMessage);
         reject(new Error(errMessage));
-        currentMovePromiseRef.current = null; // Clear ref on error
+        currentMovePromiseRef.current = null; 
         setIsLoading(false); 
       }
     });
@@ -144,4 +135,3 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     error
   };
 }
-

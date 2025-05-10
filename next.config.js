@@ -2,9 +2,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    // Using "*" to allow all origins for development.
-    // For production, this should be restricted to specific domains.
-    allowedDevOrigins: ["*"],
+    allowedDevOrigins: [
+      "3000-firebase-studio-1746739921276.cluster-hf4yr35cmnbd4vhbxvfvc6cp5q.cloudworkstations.dev",
+      "localhost:3000"
+    ]
   },
   typescript: {
     ignoreBuildErrors: true,

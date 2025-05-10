@@ -1,4 +1,5 @@
-"use client";
+
+"use client"; // Ensures this component and its children are client-rendered
 
 import React, { useState, useEffect, useCallback } from 'react';
 import type { GameState, PlayerId } from '@/lib/gameLogic';
@@ -6,11 +7,11 @@ import {
   createInitialGameState, 
   placePawn, 
   movePawn, 
-  highlightValidMoves, 
-  clearHighlights as clearSelectionLogic,
+  selectPawn as selectPawnLogic, 
+  clearSelection as clearSelectionLogic,
   PAWNS_PER_PLAYER
 } from '@/lib/gameLogic';
-import type { AIAction } from '@/lib/ai/mcts';
+import type { Action as AIAction } from '@/lib/ai/mcts'; // Assuming MCTS action type
 
 import { GameBoard } from '@/components/game/GameBoard';
 import { PlayerCard } from '@/components/game/PlayerCard';
@@ -32,8 +33,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Bot, Users, Wifi, Copy, LinkIcon, Home } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Bot, Users, Wifi, Copy, Link as LinkIcon, Home } from 'lucide-react'; // Renamed Link to LinkIcon
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 
 type GameMode = 'ai' | 'local' | 'remote' | 'select';
@@ -57,6 +58,7 @@ export function StrategicPawnsGame() {
     localPlayerId: remoteLocalPlayerId,
     players: remotePlayers,
     isConnected,
+    isConnecting,
     error: gameConnectionError,
     gameId: connectedGameId,
     isWaitingForOpponent,
@@ -65,6 +67,8 @@ export function StrategicPawnsGame() {
     placePawnAction: remotePlacePawn,
     movePawnAction: remoteMovePawn,
     clearError: clearRemoteError,
+    connect: connectSocketIO, // Added connectSocketIO
+    disconnect: disconnectSocketIO // Added disconnectSocketIO
   } = useGameConnection();
 
   const [isRulesOpen, setIsRulesOpen] = useState(false);
@@ -83,16 +87,18 @@ export function StrategicPawnsGame() {
       const nameFromQuery = searchParams.get('playerName');
       if (nameFromQuery) {
         setRemotePlayerName(nameFromQuery);
+        if(!isConnected && !isConnecting) connectSocketIO(); // Connect if not already
         if(isConnected && !connectedGameId) joinRemoteGame(gameIdFromPath, nameFromQuery);
       } else {
         const storedName = typeof window !== 'undefined' ? localStorage.getItem('playerName') : null;
         if (storedName) {
             setRemotePlayerName(storedName);
+            if(!isConnected && !isConnecting) connectSocketIO(); // Connect if not already
             if(isConnected && !connectedGameId) joinRemoteGame(gameIdFromPath, storedName);
         }
       }
     }
-  }, [pathParams, gameMode, searchParams, isConnected, connectedGameId, joinRemoteGame]);
+  }, [pathParams, gameMode, searchParams, isConnected, connectedGameId, joinRemoteGame, isConnecting, connectSocketIO]);
 
 
   const activeGameState = gameMode === 'remote' ? remoteSocketGameState : localGameState;
@@ -104,11 +110,11 @@ export function StrategicPawnsGame() {
   useEffect(() => {
     if (gameMode === 'ai' && localGameState?.currentPlayerId === 2 && !localGameState?.winner && !isAILoading) {
       const makeAIMove = async () => {
-        if(!localGameState) return; // Ensure localGameState is not null
+        if(!localGameState) return; 
         const clonedState = structuredClone(localGameState);
         const aiAction = await calculateBestMove(clonedState);
         
-        if (aiAction && localGameState) { // Re-check localGameState in case it became null
+        if (aiAction && localGameState) { 
           let nextState: GameState | null = null;
           if (aiAction.type === 'place' && aiAction.squareIndex !== undefined) {
             nextState = placePawn(localGameState, aiAction.squareIndex);
@@ -154,7 +160,7 @@ export function StrategicPawnsGame() {
     } else { 
       if (localGameState.selectedPawnIndex === null) {
         if (square.pawn && square.pawn.playerId === localGameState.currentPlayerId && !localGameState.blockedPawnsInfo.has(index)) {
-          newState = highlightValidMoves(localGameState, index);
+          newState = selectPawnLogic(localGameState, index);
         } else if (square.pawn && localGameState.blockedPawnsInfo.has(index)) {
           toast({ title: t('pawnBlocked'), description: t('pawnBlockedDescription'), variant: "destructive" });
         }
@@ -164,7 +170,7 @@ export function StrategicPawnsGame() {
         } else if (square.highlight === 'validMove') {
           newState = movePawn(localGameState, localGameState.selectedPawnIndex, index);
         } else if (square.pawn && square.pawn.playerId === localGameState.currentPlayerId && !localGameState.blockedPawnsInfo.has(index)){
-          newState = highlightValidMoves(localGameState, index);
+          newState = selectPawnLogic(localGameState, index);
         } else {
           newState = clearSelectionLogic(localGameState);
         }
@@ -186,7 +192,7 @@ export function StrategicPawnsGame() {
     } else { 
       if (remoteSocketGameState.selectedPawnIndex === null) { 
         if (square.pawn && square.pawn.playerId === remoteLocalPlayerId && !remoteSocketGameState.blockedPawnsInfo.has(index)) {
-          const tempState = highlightValidMoves(remoteSocketGameState, index);
+          const tempState = selectPawnLogic(remoteSocketGameState, index);
           useGameStore.getState().setGameState(tempState); 
         } else if (square.pawn && remoteSocketGameState.blockedPawnsInfo.has(index)) {
           toast({ title: t('pawnBlocked'), description: t('pawnBlockedDescription'), variant: "destructive" });
@@ -198,7 +204,7 @@ export function StrategicPawnsGame() {
         } else if (square.highlight === 'validMove') {
             remoteMovePawn(remoteSocketGameState.selectedPawnIndex, index);
         } else if (square.pawn && square.pawn.playerId === remoteLocalPlayerId && !remoteSocketGameState.blockedPawnsInfo.has(index)) {
-           const tempState = highlightValidMoves(remoteSocketGameState, index);
+           const tempState = selectPawnLogic(remoteSocketGameState, index);
            useGameStore.getState().setGameState(tempState);
         } else {
            const tempState = clearSelectionLogic(remoteSocketGameState);
@@ -226,7 +232,7 @@ export function StrategicPawnsGame() {
 
     if (activeGameState.gamePhase !== 'movement' || activeGameState.blockedPawnsInfo.has(pawnIndex)) return;
     
-    const highlightedState = highlightValidMoves(activeGameState, pawnIndex);
+    const highlightedState = selectPawnLogic(activeGameState, pawnIndex);
     if (gameMode === 'remote' && remoteSocketGameState) useGameStore.getState().setGameState(highlightedState);
     else if (localGameState) setLocalGameState(highlightedState);
   }, [activeGameState, activeLocalPlayerId, remoteLocalPlayerId, gameMode, localGameState, remoteSocketGameState]);
@@ -266,12 +272,12 @@ export function StrategicPawnsGame() {
         }
         if (typeof window !== 'undefined') localStorage.setItem('playerName', remotePlayerName.trim());
         
+        connectSocketIO(); // Ensure socket is connected before creating/joining
+
         if(remoteGameIdInput.trim()){ 
-            if (isConnected) joinRemoteGame(remoteGameIdInput.trim(), remotePlayerName.trim());
-            else toast({title: t('errorTitle'), description: "Not connected to server.", variant: "destructive"});
+            joinRemoteGame(remoteGameIdInput.trim(), remotePlayerName.trim());
         } else { 
-            if (isConnected) createRemoteGame(remotePlayerName.trim());
-            else toast({title: t('errorTitle'), description: "Not connected to server.", variant: "destructive"});
+            createRemoteGame(remotePlayerName.trim());
         }
     }
     setGameMode(mode);
@@ -282,6 +288,16 @@ export function StrategicPawnsGame() {
         router.push(`/game/${connectedGameId}?playerName=${encodeURIComponent(remotePlayerName)}`);
     }
   }, [gameMode, connectedGameId, remotePlayerName, router, pathParams]);
+
+  // Go back to menu, ensuring socket is disconnected if it was a remote game
+  const goBackToMenu = () => {
+    if (gameMode === 'remote' && isConnected) {
+      disconnectSocketIO();
+    }
+    setGameMode('select');
+    router.push('/'); // Navigate to base path for game selection
+  };
+
 
   if (gameMode === 'select') {
     return (
@@ -327,10 +343,10 @@ export function StrategicPawnsGame() {
                 <Input id="gameIdInput" value={remoteGameIdInput} onChange={(e) => setRemoteGameIdInput(e.target.value)} placeholder={t('enterGameIdToJoinOrCreate')} />
                  <Button onClick={() => navigator.clipboard.writeText(remoteGameIdInput).then(()=>toast({title: "Game ID Copied!"}))} variant="outline" size="icon" disabled={!remoteGameIdInput}><Copy className="h-4 w-4"/></Button>
                 </div>
-                <Button onClick={() => handleStartGameMode('remote')} className="w-full" disabled={!isConnected || !remotePlayerName.trim()}>
-                  {remoteGameIdInput.trim() ? t('joinGameButton') : t('createGameButton')}
+                <Button onClick={() => handleStartGameMode('remote')} className="w-full" disabled={isConnecting || !remotePlayerName.trim()}>
+                  {isConnecting ? t('connectingToServer') : (remoteGameIdInput.trim() ? t('joinGameButton') : t('createGameButton'))}
                 </Button>
-                 {!isConnected && <p className="text-xs text-destructive text-center">{t('connectingToServer')}</p>}
+                 {gameConnectionError && <p className="text-xs text-destructive text-center">{gameConnectionError}</p>}
               </TabsContent>
             </Tabs>
           </CardContent>
@@ -339,8 +355,11 @@ export function StrategicPawnsGame() {
     );
   }
   
-  if (gameMode === 'remote' && !isConnected && !gameConnectionError) {
-    return <div className="flex items-center justify-center min-h-screen text-lg">{t('connectingToServer')}</div>;
+  if (gameMode === 'remote' && !isConnected && !gameConnectionError && !isConnecting) {
+    return <div className="flex items-center justify-center min-h-screen text-lg">{t('connectingToServer')}... <Button onClick={connectSocketIO} className="ml-2">Retry</Button></div>;
+  }
+  if (gameMode === 'remote' && isConnecting) {
+    return <div className="flex items-center justify-center min-h-screen text-lg">{t('connectingToServer')}...</div>;
   }
   if (gameMode === 'remote' && isWaitingForOpponent && connectedGameId) {
     return <WaitingRoom gameId={connectedGameId} playerName={remotePlayerName || ''} />;
@@ -352,7 +371,7 @@ export function StrategicPawnsGame() {
   return (
     <>
       <main className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-2 sm:p-4 selection:bg-primary selection:text-primary-foreground">
-         <Button variant="ghost" onClick={() => setGameMode('select')} className="absolute top-4 left-4 text-sm">
+         <Button variant="ghost" onClick={goBackToMenu} className="absolute top-4 left-4 text-sm">
             <Home className="mr-2 h-4 w-4"/> {t('backToMenu')}
         </Button>
         <div className="w-full max-w-7xl mx-auto">
