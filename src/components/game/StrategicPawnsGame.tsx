@@ -1,3 +1,4 @@
+
 "use client"; 
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -6,8 +7,8 @@ import {
   createInitialGameState, 
   placePawn as placePawnLogic, 
   movePawn as movePawnLogic, 
-  highlightValidMoves, 
-  clearHighlights,
+  selectPawn,  // Changed from selectPawn as selectPawnLogic
+  clearSelection, // Changed from clearSelection as clearSelectionLogic
   PAWNS_PER_PLAYER
 } from '@/lib/gameLogic';
 
@@ -157,19 +158,19 @@ export function StrategicPawnsGame() {
     } else { 
       if (localGameState.selectedPawnIndex === null) {
         if (square.pawn && square.pawn.playerId === localGameState.currentPlayerId && !localGameState.blockedPawnsInfo.has(index)) {
-          newState = highlightValidMoves(localGameState, index);
+          newState = selectPawn(localGameState, index); // Use selectPawn
         } else if (square.pawn && localGameState.blockedPawnsInfo.has(index)) {
           toast({ title: t('pawnBlocked'), description: t('pawnBlockedDescription'), variant: "destructive" });
         }
       } else {
         if (localGameState.selectedPawnIndex === index) {
-          newState = clearHighlights(localGameState);
+          newState = clearSelection(localGameState); // Use clearSelection
         } else if (square.highlight === 'validMove') {
           newState = movePawnLogic(localGameState, localGameState.selectedPawnIndex, index);
         } else if (square.pawn && square.pawn.playerId === localGameState.currentPlayerId && !localGameState.blockedPawnsInfo.has(index)){
-          newState = highlightValidMoves(localGameState, index);
+          newState = selectPawn(localGameState, index); // Use selectPawn
         } else {
-          newState = clearHighlights(localGameState);
+          newState = clearSelection(localGameState); // Use clearSelection
         }
       }
     }
@@ -189,22 +190,22 @@ export function StrategicPawnsGame() {
     } else { 
       if (remoteSocketGameState.selectedPawnIndex === null) { 
         if (square.pawn && square.pawn.playerId === remoteLocalPlayerId && !remoteSocketGameState.blockedPawnsInfo.has(index)) {
-          const tempState = highlightValidMoves(remoteSocketGameState, index);
+          const tempState = selectPawn(remoteSocketGameState, index); // Use selectPawn
           useGameStore.getState().setGameState(tempState); 
         } else if (square.pawn && remoteSocketGameState.blockedPawnsInfo.has(index)) {
           toast({ title: t('pawnBlocked'), description: t('pawnBlockedDescription'), variant: "destructive" });
         }
       } else { 
         if (remoteSocketGameState.selectedPawnIndex === index) { 
-            const tempState = clearHighlights(remoteSocketGameState);
+            const tempState = clearSelection(remoteSocketGameState); // Use clearSelection
             useGameStore.getState().setGameState(tempState);
         } else if (square.highlight === 'validMove') {
             remoteMovePawn(remoteSocketGameState.selectedPawnIndex, index);
         } else if (square.pawn && square.pawn.playerId === remoteLocalPlayerId && !remoteSocketGameState.blockedPawnsInfo.has(index)) {
-           const tempState = highlightValidMoves(remoteSocketGameState, index);
+           const tempState = selectPawn(remoteSocketGameState, index); // Use selectPawn
            useGameStore.getState().setGameState(tempState);
         } else {
-           const tempState = clearHighlights(remoteSocketGameState);
+           const tempState = clearSelection(remoteSocketGameState); // Use clearSelection
            useGameStore.getState().setGameState(tempState);
         }
       }
@@ -229,7 +230,7 @@ export function StrategicPawnsGame() {
 
     if (activeGameState.gamePhase !== 'movement' || activeGameState.blockedPawnsInfo.has(pawnIndex)) return;
     
-    const highlightedState = highlightValidMoves(activeGameState, pawnIndex);
+    const highlightedState = selectPawn(activeGameState, pawnIndex); // Use selectPawn
     if (gameMode === 'remote' && remoteSocketGameState) useGameStore.getState().setGameState(highlightedState);
     else if (localGameState) setLocalGameState(highlightedState);
   }, [activeGameState, activeLocalPlayerId, remoteLocalPlayerId, gameMode, localGameState, remoteSocketGameState]);
@@ -237,7 +238,7 @@ export function StrategicPawnsGame() {
   const handlePawnDrop = useCallback((targetIndex: number) => {
     if (!activeGameState || activeGameState.selectedPawnIndex === null) {
       if(activeGameState) {
-        const clearedState = clearHighlights(activeGameState);
+        const clearedState = clearSelection(activeGameState); // Use clearSelection
         if (gameMode === 'remote' && remoteSocketGameState) useGameStore.getState().setGameState(clearedState);
         else if (localGameState) setLocalGameState(clearedState);
       }
@@ -254,7 +255,7 @@ export function StrategicPawnsGame() {
         }
     } else {
         toast({ title: t('invalidDrop'), description: t('invalidDropDescription'), variant: "destructive" });
-        const clearedState = clearHighlights(activeGameState); 
+        const clearedState = clearSelection(activeGameState);  // Use clearSelection
         if (gameMode === 'remote' && remoteSocketGameState) useGameStore.getState().setGameState(clearedState);
         else if (localGameState) setLocalGameState(clearedState);
     }
@@ -340,7 +341,7 @@ export function StrategicPawnsGame() {
                     ))}
                   </RadioGroup>
                 </div>
-                <Button onClick={() => handleStartGameMode('ai')} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground py-3 text-base font-semibold rounded-lg shadow-md transition-transform hover:scale-105">
+                <Button onClick={()={() => handleStartGameMode('ai')} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground py-3 text-base font-semibold rounded-lg shadow-md transition-transform hover:scale-105">
                   <Bot className="mr-2 h-5 w-5"/> {t('startGame')}
                 </Button>
               </TabsContent>

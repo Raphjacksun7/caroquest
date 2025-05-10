@@ -1,19 +1,30 @@
 
 import { v4 as uuidv4 } from 'uuid';
-import type { GameState, PlayerId, StoredPlayer, GameOptions } from './types'; 
-import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors } from './gameLogic'; 
+import type { GameState, PlayerId, StoredPlayer, GameOptions } from './types';
+import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors } from './gameLogic';
 
 interface GameData {
   id: string;
   state: GameState;
   players: StoredPlayer[];
   lastActivity: number;
-  options: GameOptions; 
-  sequenceId: number; 
-  createdAt: Date;
+  options: GameOptions;
+  sequenceId: number;
+  createdAt: number; // Changed from Date to number (timestamp) for easier JSON serialization
 }
 
-export class GameStore {
+export interface GameStore {
+  createGame(creatorSocketId: string, creatorName: string, options?: GameOptions): string;
+  getGame(gameId: string): GameData | null;
+  updateGameState(gameId: string, state: GameState): boolean;
+  addPlayerToGame(gameId: string, socketId: string, playerName: string): { success: boolean, assignedPlayerId?: PlayerId, existingPlayers?: StoredPlayer[], error?: string };
+  deleteGame(gameId: string): void;
+  removePlayerFromGame(gameId: string, socketId: string): StoredPlayer | null;
+  getPublicGames(limit?: number): Array<Partial<GameData> & { playerCount: number, createdBy: string }>;
+  destroy(): void;
+}
+
+class InMemoryGameStore implements GameStore {
   private inMemoryGames: Map<string, GameData>;
   private readonly gameTTLMs = 3600 * 24 * 1000; // 24 hours in milliseconds
   private cleanupInterval: NodeJS.Timeout | null = null;
@@ -25,7 +36,7 @@ export class GameStore {
   }
 
   private startCleanupInterval(): void {
-    if (this.cleanupInterval) clearInterval(this.cleanupInterval); 
+    if (this.cleanupInterval) clearInterval(this.cleanupInterval);
     this.cleanupInterval = setInterval(() => {
       const now = Date.now();
       this.inMemoryGames.forEach((game, gameId) => {
@@ -36,12 +47,12 @@ export class GameStore {
       });
     }, 60 * 60 * 1000); // Check every hour
   }
-  
+
   public createGame(creatorSocketId: string, creatorName: string, options: GameOptions = {}): string {
     const gameId = options.gameIdToCreate || uuidv4().substring(0, 8).toUpperCase();
     const pawns = options.pawnsPerPlayer || PAWNS_PER_PLAYER;
     const initialState = createInitialGameState(pawns);
-    
+
     const gameData: GameData = {
       id: gameId,
       state: initialState,
@@ -49,27 +60,25 @@ export class GameStore {
       lastActivity: Date.now(),
       options,
       sequenceId: 0,
-      createdAt: new Date(),
+      createdAt: Date.now(),
     };
-    
+
     this.inMemoryGames.set(gameId, gameData);
     console.log(`GameStore (in-memory): Created game ${gameId} for ${creatorName}`);
     return gameId;
   }
-  
+
   private hydrateGameState(state: GameState): GameState {
-    // Ensure all Set and Map fields are properly instantiated
-    // This is important if state comes from JSON.parse or similar serialization
     return {
       ...state,
-      playerColors: state.playerColors || assignPlayerColors(), // Default if missing
+      playerColors: state.playerColors || assignPlayerColors(),
       blockedPawnsInfo: new Set(Array.from(state.blockedPawnsInfo || [])),
       blockingPawnsInfo: new Set(Array.from(state.blockingPawnsInfo || [])),
       deadZoneSquares: new Map(
-        (Array.isArray(state.deadZoneSquares) 
-          ? state.deadZoneSquares 
+        (Array.isArray(state.deadZoneSquares)
+          ? state.deadZoneSquares
           : Object.entries(state.deadZoneSquares || {})
-        ).map(([k, v]: [string | number, PlayerId]) => [Number(k), v]) 
+        ).map(([k, v]: [string | number, PlayerId]) => [Number(k), v])
       ),
       deadZoneCreatorPawnsInfo: new Set(Array.from(state.deadZoneCreatorPawnsInfo || [])),
       pawnsToPlace: state.pawnsToPlace || { 1: PAWNS_PER_PLAYER, 2: PAWNS_PER_PLAYER },
@@ -81,33 +90,31 @@ export class GameStore {
     const gameData = this.inMemoryGames.get(gameId);
     if (!gameData) return null;
 
-    // Return a deep copy to prevent direct modification of stored state
-    // and ensure Sets/Maps are proper instances
-    const deepCopiedGameData = JSON.parse(JSON.stringify(gameData)) as GameData;
+    const deepCopiedGameData = JSON.parse(JSON.stringify(gameData)) as GameData; // Deep copy
     deepCopiedGameData.state = this.hydrateGameState(deepCopiedGameData.state);
-    deepCopiedGameData.createdAt = new Date(gameData.createdAt); 
+    // createdAt is already a number (timestamp)
     return deepCopiedGameData;
   }
-  
+
   public updateGameState(gameId: string, state: GameState): boolean {
     const game = this.inMemoryGames.get(gameId);
     if (!game) {
       console.warn(`GameStore (in-memory): Attempted to update non-existent game: ${gameId}`);
       return false;
     }
-    game.state = this.hydrateGameState(state); 
+    game.state = this.hydrateGameState(state);
     game.lastActivity = Date.now();
     game.sequenceId++;
     return true;
   }
-  
-  public addPlayerToGame(gameId: string, socketId: string, playerName: string): {success: boolean, assignedPlayerId?: PlayerId, existingPlayers?: StoredPlayer[], error?: string}> {
+
+  public addPlayerToGame(gameId: string, socketId: string, playerName: string): { success: boolean, assignedPlayerId?: PlayerId, existingPlayers?: StoredPlayer[], error?: string } {
     const gameData = this.inMemoryGames.get(gameId);
     if (!gameData) return { success: false, error: 'Game not found.' };
-    
+
     const existingPlayer = gameData.players.find(p => p.id === socketId);
-    if (existingPlayer) { 
-      existingPlayer.name = playerName; 
+    if (existingPlayer) {
+      existingPlayer.name = playerName;
       gameData.lastActivity = Date.now();
       return { success: true, assignedPlayerId: existingPlayer.playerId, existingPlayers: gameData.players };
     }
@@ -115,14 +122,14 @@ export class GameStore {
     if (gameData.players.length >= 2) {
       return { success: false, error: 'Game is full.' };
     }
-    
-    const assignedPlayerId = (gameData.players[0]?.playerId === 1 ? 2 : 1) as PlayerId; 
+
+    const assignedPlayerId = (gameData.players[0]?.playerId === 1 ? 2 : 1) as PlayerId;
     gameData.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId });
     gameData.lastActivity = Date.now();
-    
+
     return { success: true, assignedPlayerId, existingPlayers: gameData.players };
   }
-    
+
   public deleteGame(gameId: string): void {
     this.inMemoryGames.delete(gameId);
     console.log(`GameStore (in-memory): Deleted game ${gameId}`);
@@ -147,9 +154,9 @@ export class GameStore {
   public getPublicGames(limit = 10): Array<Partial<GameData> & { playerCount: number, createdBy: string }> {
     const publicGamesData: Array<Partial<GameData> & { playerCount: number, createdBy: string }> = [];
     let count = 0;
-    
+
     const sortedGames = Array.from(this.inMemoryGames.values())
-      .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()); 
+      .sort((a, b) => b.createdAt - a.createdAt); // Sort by timestamp
 
     for (const game of sortedGames) {
       if (game.options?.isPublic && game.players.length < 2) {
@@ -157,7 +164,7 @@ export class GameStore {
           id: game.id,
           createdBy: game.players[0]?.name || 'Unknown',
           playerCount: game.players.length,
-          createdAt: game.createdAt, 
+          createdAt: game.createdAt,
           options: game.options,
         });
         count++;
@@ -177,4 +184,5 @@ export class GameStore {
   }
 }
 
-```
+// Export a singleton instance
+export const gameStore: GameStore = new InMemoryGameStore();

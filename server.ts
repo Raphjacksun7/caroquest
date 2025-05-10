@@ -4,11 +4,9 @@ import { parse } from 'url';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { setupGameSockets } from './src/lib/socketHandler';
-import { setupMatchmaking } from './src/lib/matchmaking'; 
-import { GameStore } from './src/lib/gameStore';
-
-// Initialize in-memory game store
-const gameStore = new GameStore(); 
+import { setupMatchmaking } from './src/lib/matchmaking';
+// Import the gameStore instance directly
+import { gameStore } from './src/lib/gameStore';
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -77,8 +75,9 @@ app.prepare().then(async () => {
 
 const gracefulShutdown = () => {
   console.log('Initiating graceful shutdown...');
+  // gameStore is now directly an instance of a class implementing GameStore interface
   if (gameStore && typeof gameStore.destroy === 'function') {
-    gameStore.destroy(); 
+    gameStore.destroy();
   }
   // Ensure other resources are cleaned up if necessary
   process.exit(0);
@@ -86,5 +85,3 @@ const gracefulShutdown = () => {
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
-
-```
