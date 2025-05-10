@@ -1,18 +1,17 @@
 
 import type { Server as SocketIOServer, Socket } from 'socket.io';
-import type { Redis } from 'ioredis';
 import type { GameStore, StoredPlayer, GameOptions } from './gameStore'; 
 import { 
   serializeGameState, 
-  deserializeGameState, 
+  // deserializeGameState, // Deserialization is client-side
   createDeltaUpdate 
 } from './serialization';
 import { 
   placePawn, 
   movePawn, 
-  GameState,
+  GameState, // Make sure GameState is imported if needed here
   PlayerId
-} from './gameLogic'; // Assuming GameState and PlayerId are correctly exported
+} from './gameLogic';
 import LZString from 'lz-string';
 
 const RATE_LIMIT_CONFIG = {
@@ -30,7 +29,7 @@ interface ClientRateLimitInfo {
   lastResetTime: number;
 }
 
-export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis: Redis | null) {
+export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
   const clientRateLimits = new Map<string, ClientRateLimitInfo>();
   const gamePreviousStates = new Map<string, GameState>(); 
 
@@ -86,7 +85,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
 
         socket.join(gameId);
         currentJoinedGameId = gameId;
-        gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(game.state))); // Deep clone for prev state
+        gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(game.state)));
         
         const binaryState = serializeGameState(game.state);
         const compressedState = LZString.compressToUint8Array(binaryState);
@@ -94,7 +93,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
         socket.emit('game_created', { 
           gameId, 
           playerId: 1 as PlayerId, 
-          gameState: compressedState,
+          gameState: Array.from(compressedState), // Convert Uint8Array to Array for JSON serialization
           players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
           timestamp: Date.now()
         });
@@ -129,7 +128,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
             socket.emit('game_joined', { 
               gameId, 
               playerId: existingPlayer.playerId, 
-              gameState: compressedState,
+              gameState: Array.from(compressedState),
               players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
               opponentName: game.players.find(p => p.id !== socket.id)?.name || null,
               timestamp: Date.now()
@@ -165,35 +164,26 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
         socket.emit('game_joined', { 
           gameId, 
           playerId: result.assignedPlayerId, 
-          gameState: compressedState,
+          gameState: Array.from(compressedState),
           players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
           opponentName: updatedGame.players.find(p => p.id !== socket.id)?.name || null,
           timestamp: Date.now()
         });
         
-        // Use Redis to publish if available, otherwise direct emit for single instance
         const opponentJoinedPayload = { 
             opponentName: playerName, 
             players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
             timestamp: Date.now()
         };
-        if (redis && redis.status === 'ready') {
-            redis.publish('game-events', JSON.stringify({ type: 'opponent_joined', gameId, data: opponentJoinedPayload }));
-        } else {
-            socket.to(gameId).emit('opponent_joined', opponentJoinedPayload);
-        }
+        socket.to(gameId).emit('opponent_joined', opponentJoinedPayload);
         
         if (updatedGame.players.length === 2) {
             const gameStartPayload = { 
-                gameState: compressedState,
+                gameState: Array.from(compressedState),
                 players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
                 timestamp: Date.now() 
             };
-            if (redis && redis.status === 'ready') {
-                redis.publish('game-events', JSON.stringify({ type: 'game_start', gameId, data: gameStartPayload }));
-            } else {
-                io.to(gameId).emit('game_start', gameStartPayload);
-            }
+            io.to(gameId).emit('game_start', gameStartPayload);
             console.log(`Socket.IO: Game started: ${gameId}`);
         }
         console.log(`Socket.IO: Player ${playerName} (Player ${result.assignedPlayerId}) joined game: ${gameId}`);
@@ -248,11 +238,11 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
             socket.emit('game_error', { message: 'Failed to update game state on server.' }); return;
           }
           
-          const prevState = gamePreviousStates.get(gameId) || currentGameState; // Fallback to current if prev not found
+          const prevState = gamePreviousStates.get(gameId) || currentGameState; 
           const deltaUpdates = createDeltaUpdate(prevState, newState);
-          gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(newState))); // Deep clone for next prev state
+          gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(newState)));
           
-          const updatedGame = await gameStore.getGame(gameId); // Get the game with updated sequenceId
+          const updatedGame = await gameStore.getGame(gameId); 
           if (!updatedGame) { socket.emit('game_error', { message: 'Internal server error retrieving updated game.' }); return;}
 
           const shouldSendFullState = updatedGame.sequenceId % 10 === 0 || deltaUpdates.length === 0 || deltaUpdates.length > 10; 
@@ -260,8 +250,8 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
           const binaryStateToSend = serializeGameState(newState);
           const compressedStateToSend = LZString.compressToUint8Array(binaryState);
           
-          const eventData = { 
-            gameState: compressedStateToSend,
+          const eventDataFull = { 
+            gameState: Array.from(compressedStateToSend),
             timestamp: Date.now(),
             fullUpdate: true 
           };
@@ -272,11 +262,9 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
           };
 
           if (shouldSendFullState) {
-            if (redis && redis.status === 'ready') redis.publish('game-events', JSON.stringify({ type: 'game_updated', gameId, data: eventData }));
-            else io.to(gameId).emit('game_updated', eventData);
+            io.to(gameId).emit('game_updated', eventDataFull);
           } else {
-            if (redis && redis.status === 'ready') redis.publish('game-events', JSON.stringify({ type: 'game_delta', gameId, data: deltaEventData }));
-            else io.to(gameId).emit('game_delta', deltaEventData);
+            io.to(gameId).emit('game_delta', deltaEventData);
           }
         } catch (error: any) {
           console.error(`Socket.IO: Error handling ${actionType}:`, error);
@@ -294,11 +282,10 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
             const binaryState = serializeGameState(game.state);
             const compressedState = LZString.compressToUint8Array(binaryState);
             const fullStateData = { 
-                gameState: compressedState,
+                gameState: Array.from(compressedState),
                 timestamp: Date.now(),
                 fullUpdate: true
             };
-            // Full state directly to requester, not via pub/sub to avoid broadcast
             socket.emit('game_updated', fullStateData);
         } else {
             socket.emit('game_error', { message: `Full state requested for non-existent game: ${gameId}` });
@@ -324,12 +311,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis
               remainingPlayers,
               timestamp: Date.now()
             };
-
-            if (redis && redis.status === 'ready') {
-                redis.publish('game-events', JSON.stringify({type: 'opponent_disconnected', gameId: currentJoinedGameId, data: opponentDisconnectedPayload}));
-            } else {
-                 io.to(currentJoinedGameId).emit('opponent_disconnected', opponentDisconnectedPayload);
-            }
+            io.to(currentJoinedGameId).emit('opponent_disconnected', opponentDisconnectedPayload);
             console.log(`Socket.IO: Player ${removedPlayer.name} (Socket: ${socket.id}) left game ${currentJoinedGameId}`);
             
             if (!game || game.players.length === 0) {

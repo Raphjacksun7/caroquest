@@ -16,11 +16,10 @@
     "src/lib/gameLogic.ts",
     "src/lib/types.ts",
     "src/lib/gameStore.ts",
-    "src/lib/matchmaking.ts", // Added matchmaking
+    "src/lib/matchmaking.ts",
     "src/lib/serialization.ts",
-    "src/lib/generated/**/*.ts", // Keep if FlatBuffers generated files are still in use
+    "src/lib/generated/**/*.ts",
     "src/types/**/*.ts"
-    // Removed "src/hooks/useGameConnection.ts" as it's client-side
   ],
   "exclude": ["node_modules", "src/app", "src/components", "src/hooks", "src/locales", "public/workers", "src/lib/clientUtils.ts"]
 }
