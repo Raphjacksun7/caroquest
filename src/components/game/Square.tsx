@@ -1,6 +1,7 @@
+
 "use client";
 
-import type { SquareState, GameState } from '@/lib/gameLogic';
+import type { SquareState, GameState, PlayerId } from '@/lib/gameLogic';
 import { Pawn } from './Pawn';
 import { cn } from '@/lib/utils';
 import React from 'react';
@@ -29,36 +30,42 @@ export const Square = ({
   const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, winningLine } = gameState;
   const [isDragOver, setIsDragOver] = React.useState(false);
 
-  const deadZonePlayerTarget = deadZoneSquares.get(index); // Player for whom this square is a dead zone
-  const isActualDeadZone = deadZonePlayerTarget !== undefined;
-  // A square is a dead zone relevant to the current player if it's a dead zone for them.
-  const isDeadZoneForCurrentPlayer = deadZonePlayerTarget === currentPlayerId;
+  const deadZoneForPlayerId = deadZoneSquares.get(index); 
+  const isActualDeadZone = deadZoneForPlayerId !== undefined;
+  const isDeadZoneForCurrentPlayer = deadZoneForPlayerId === currentPlayerId;
   
   const isCurrentPlayerSquareColor = boardColor === playerColors[currentPlayerId];
   const isWinningSquare = winningLine?.includes(index) ?? false;
   
   let tooltipContentText = '';
   if (isActualDeadZone) {
-    tooltipContentText = `Dead Zone: Player ${deadZonePlayerTarget} cannot use this square for winning or placement.`;
+    const affectedPlayerName = deadZoneForPlayerId === 1 ? "Player 1" : "Player 2";
+    tooltipContentText = `Dead Zone: ${affectedPlayerName} cannot use this square for winning or placement.`;
   }
 
-  let squareBgClass = boardColor === 'light' 
+  let squareBgStyle: React.CSSProperties = {};
+  let baseBgClass = boardColor === 'light' 
     ? 'bg-[hsl(var(--board-light-square))]' 
     : 'bg-[hsl(var(--board-dark-square))]';
   
   let conditionalClasses = '';
-  let hoverInteractionClasses = 'group-hover/board:opacity-90';
+  let hoverInteractionClasses = 'group-hover/board:opacity-90'; // Default hover for board context
 
   if (isWinningSquare) {
-     squareBgClass = `bg-[hsl(var(--highlight-win-line))] ${boardColor === 'light' ? 'bg-opacity-70' : 'bg-opacity-60'}`;
+     squareBgStyle = { backgroundColor: 'hsl(var(--highlight-win-line-bg))' };
+     // bg-opacity might not work directly with HSL, so setting directly.
   } else if (highlight === 'selectedPawn') {
-    conditionalClasses = 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))] z-10';
+    // Selected pawn highlight is primarily on the Pawn itself using border/ring.
+    // Square itself doesn't need strong highlight if pawn is clearly marked.
+    // No specific background change for the square of a selected pawn.
   } else if (highlight === 'validMove') {
-    squareBgClass = boardColor === 'light' ? 'bg-green-200' : 'bg-green-700';
-    hoverInteractionClasses = 'hover:bg-opacity-80';
-    if(isDragOver) squareBgClass = boardColor === 'light' ? 'bg-green-300' : 'bg-green-800';
+    squareBgStyle = { backgroundColor: boardColor === 'light' ? 'hsl(var(--highlight-valid-move-bg))' : 'hsl(var(--highlight-valid-move-dark-bg))' };
+    hoverInteractionClasses = 'hover:brightness-95'; // Slight darken on hover for valid moves
+     if(isDragOver) {
+        squareBgStyle = { backgroundColor: boardColor === 'light' ? 'hsl(var(--highlight-valid-move-bg))' : 'hsl(var(--highlight-valid-move-dark-bg))', filter: 'brightness(0.9)' };
+     }
   } else if (lastMove?.to === index || lastMove?.from === index) {
-    squareBgClass = boardColor === 'light' ? 'bg-yellow-200' : 'bg-yellow-600';
+    squareBgStyle = { backgroundColor: boardColor === 'light' ? 'hsl(var(--highlight-last-move-light-bg))' : 'hsl(var(--highlight-last-move-dark-bg))' };
   }
 
 
@@ -66,15 +73,17 @@ export const Square = ({
   if (!winner) {
     if (gameState.gamePhase === 'placement' && !pawn && isCurrentPlayerSquareColor && !isDeadZoneForCurrentPlayer) {
       cursorClass = 'cursor-pointer';
+      hoverInteractionClasses = 'hover:brightness-90'; // General hover for placeable squares
     } else if (gameState.gamePhase === 'movement') {
-      if (pawn && pawn.playerId === currentPlayerId && !(gameState.blockedPawnsInfo instanceof Set ? gameState.blockedPawnsInfo.has(index) : false)) {
+      if (pawn && pawn.playerId === currentPlayerId && !gameState.blockedPawnsInfo.has(index)) {
         cursorClass = 'cursor-grab'; 
       } else if (!pawn && highlight === 'validMove' && !isDeadZoneForCurrentPlayer) {
         cursorClass = 'cursor-pointer'; 
       }
     }
-    if (isDeadZoneForCurrentPlayer) {
+    if (isDeadZoneForCurrentPlayer && !pawn) { // If it's a dead zone for current player, and empty
       cursorClass = 'cursor-not-allowed';
+      hoverInteractionClasses = ''; // No hover effect for not-allowed squares
     }
   }
   
@@ -88,7 +97,7 @@ export const Square = ({
     setIsDragOver(false);
   };
   
-  const squareButton = (
+  const squareElement = (
     <button
       id={`square-${index}`}
       onClick={onClick}
@@ -97,25 +106,26 @@ export const Square = ({
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       className={cn(
-        'w-14 h-14 md:w-[calc(3.75rem-2px)] md:h-[calc(3.75rem-2px)] flex items-center justify-center border border-[hsla(var(--foreground),0.1)] transition-all duration-150 relative overflow-hidden focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))] group/square',
-        squareBgClass,
+        'w-14 h-14 md:w-[calc(3.75rem-2px)] md:h-[calc(3.75rem-2px)] flex items-center justify-center border border-[hsla(var(--foreground),0.08)] transition-all duration-150 relative overflow-hidden focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))] group/square',
+        baseBgClass, // Base background color class
         conditionalClasses,
         cursorClass,
         hoverInteractionClasses,
-        isDragOver && highlight === 'validMove' && !pawn && 'ring-2 ring-[hsl(var(--highlight-valid-move))]',
-        isDeadZoneForCurrentPlayer && 'opacity-70 bg-opacity-80',
+        isDragOver && highlight === 'validMove' && !pawn && 'ring-2 ring-[hsl(var(--highlight-valid-move-indicator))]',
+        isDeadZoneForCurrentPlayer && 'opacity-80',
       )}
-      aria-label={`Square ${index}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isActualDeadZone ? `, Dead Zone for Player ${deadZonePlayerTarget}` : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
-      disabled={!!winner || isDeadZoneForCurrentPlayer} // Player cannot interact with their own dead zones
+      style={squareBgStyle} // Apply dynamic HSL backgrounds
+      aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isActualDeadZone ? `, Dead Zone for Player ${deadZoneForPlayerId}` : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
+      disabled={!!winner || (isDeadZoneForCurrentPlayer && !pawn)} 
     >
       {isActualDeadZone && !pawn && ( 
-         <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-60 text-4xl font-bold pointer-events-none select-none">×</div>
+         <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone-marker))] opacity-70 text-4xl font-bold pointer-events-none select-none">×</div>
       )}
       
       {highlight === 'validMove' && !pawn && !isActualDeadZone && (
         <div className={cn(
-            "absolute w-3 h-3 rounded-full opacity-70 pointer-events-none select-none",
-            isDragOver ? "bg-[hsl(var(--foreground))]" : "bg-[hsl(var(--highlight-valid-move))]"
+            "absolute w-3 h-3 rounded-full opacity-80 pointer-events-none select-none",
+             isDragOver ? "bg-[hsl(var(--foreground))]" : "bg-[hsl(var(--highlight-valid-move-indicator))]"
             )} 
         />
       )}
@@ -128,16 +138,15 @@ export const Square = ({
           onPawnDragStart={onPawnDragStart}
         />
       )}
-      {/* Algebraic notation display removed */}
     </button>
   );
 
   if (tooltipContentText) {
     return (
-      <TooltipProvider delayDuration={200}>
+      <TooltipProvider delayDuration={150}>
         <Tooltip>
           <TooltipTrigger asChild>
-            {squareButton}
+            {squareElement}
           </TooltipTrigger>
           <TooltipContent side="top" align="center" className="bg-popover text-popover-foreground rounded-md px-3 py-1.5 text-sm shadow-md z-50 max-w-xs">
             <p>{tooltipContentText}</p>
@@ -147,6 +156,6 @@ export const Square = ({
     );
   }
 
-  return squareButton;
+  return squareElement;
 };
     

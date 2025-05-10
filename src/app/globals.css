@@ -7,6 +7,10 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+body.dragging-pawn, body.dragging-pawn * {
+  cursor: grabbing !important;
+}
+
 @layer base {
   :root {
     --background: 220 20% 96%; /* Light gray background */
@@ -43,13 +47,23 @@ body {
     --board-dark-square: 30 31% 55%; /* Brown #B58863 */
     --player1-pawn-color: 356 77% 59%; /* Warm Red #E63946 */
     --player2-pawn-color: 207 39% 44%; /* Cool Blue #457B9D */
-    --highlight-valid-move: 120 60% 70%; /* Soft green for valid moves */
-    --highlight-selected-pawn: 60 100% 75%; /* Yellow for selected pawn */
-    --highlight-blocked-pawn: 0 0% 60%; /* Gray for blocked pawn */
-    --highlight-blocking-pawn-border: 0 80% 60%; /* Orange border for blocking pawn */
-    --highlight-dead-zone: 300 50% 70%; /* Purpleish for dead zones on squares (X marker) */
+    
+    --highlight-valid-move-bg: 120 60% 90%; /* Lighter green for light squares bg */
+    --highlight-valid-move-dark-bg: 120 40% 35%; /* Darker green for dark squares bg */
+    --highlight-valid-move-indicator: 120 60% 50%; /* Green for dot indicator */
+
+    --highlight-selected-pawn-border: 60 100% 75%; /* Yellow border for selected pawn */
+    
+    --highlight-last-move-light-bg: 50 100% 90%; /* Light yellow for light square bg */
+    --highlight-last-move-dark-bg: 50 70% 40%; /* Darker yellow for dark square bg */
+    
+    --highlight-blocked-pawn-icon: 0 0% 100%; /* Color for lock icon on pawn */
+    --highlight-blocking-pawn-border: 0 80% 60%; /* Orange border for pawn that is blocking */
     --highlight-creating-dead-zone-pawn-border: 270 50% 50%; /* Darker Purple border for pawns creating dead zones */
-    --highlight-win-line: 50 100% 50%; /* Gold for win line */
+    --highlight-dead-zone-marker: 300 50% 50%; /* Purpleish 'X' for dead zones on squares */
+    
+    --highlight-win-line-bg: 50 100% 85%; /* Gold for win line background on squares */
+    --highlight-win-line-pawn-border: 50 100% 60%; /* Gold for pawn border in win line */
   }
 
   .dark {
@@ -80,18 +94,28 @@ body {
     --input: 220 15% 28%;
     --ring: 182 41% 50%;
 
-    /* Custom game colors for dark mode - adjust if needed, for now using light mode values */
-    --board-light-square: 39 40% 70%; /* Darker Beige */
-    --board-dark-square: 30 25% 40%; /* Darker Brown */
+    /* Custom game colors for dark mode */
+    --board-light-square: 39 30% 25%; /* Darker Beige for "light" squares in dark mode */
+    --board-dark-square: 30 20% 15%;  /* Darker Brown for "dark" squares in dark mode */
     --player1-pawn-color: 356 77% 65%;
     --player2-pawn-color: 207 39% 55%;
-    --highlight-valid-move: 120 50% 50%;
-    --highlight-selected-pawn: 60 80% 60%;
-    --highlight-blocked-pawn: 0 0% 50%;
+
+    --highlight-valid-move-bg: 120 30% 28%; 
+    --highlight-valid-move-dark-bg: 120 35% 20%; 
+    --highlight-valid-move-indicator: 120 50% 60%;
+
+    --highlight-selected-pawn-border: 60 80% 70%;
+    
+    --highlight-last-move-light-bg: 50 60% 30%;
+    --highlight-last-move-dark-bg: 50 50% 20%;
+    
+    --highlight-blocked-pawn-icon: 0 0% 90%;
     --highlight-blocking-pawn-border: 0 70% 50%;
-    --highlight-dead-zone: 300 40% 60%;
-    --highlight-creating-dead-zone-pawn-border: 270 40% 40%; 
-    --highlight-win-line: 50 90% 55%;
+    --highlight-creating-dead-zone-pawn-border: 270 40% 50%; 
+    --highlight-dead-zone-marker: 300 50% 65%;
+    
+    --highlight-win-line-bg: 50 90% 40%;
+    --highlight-win-line-pawn-border: 50 90% 65%;
   }
 }
 
