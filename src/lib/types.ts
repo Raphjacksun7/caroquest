@@ -36,11 +36,11 @@ export interface GameState {
   highlightedValidMoves?: number[];
 }
 
-// Added from gameStore.ts for broader use
 export interface StoredPlayer {
   id: string; // Socket ID
   name: string;
   playerId: PlayerId; 
+  isConnected: boolean; // To track connection status
 }
 
 export interface GameOptions {

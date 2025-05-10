@@ -1,6 +1,6 @@
 
 import { v4 as uuidv4 } from 'uuid';
-import type { GameState, PlayerId, StoredPlayer, GameOptions } from './types'; // Ensure GameOptions is used from types
+import type { GameState, PlayerId, StoredPlayer, GameOptions } from './types'; 
 import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors } from './gameLogic';
 
 // Interface for the actual data stored for each game
@@ -11,7 +11,7 @@ interface GameData {
   lastActivity: number;
   options: GameOptions;
   sequenceId: number;
-  createdAt: number; // Ensure this is part of the interface
+  createdAt: number; 
 }
 
 export interface GameStore {
@@ -22,7 +22,7 @@ export interface GameStore {
   deleteGame(gameId: string): Promise<void>;
   removePlayerFromGame(gameId: string, socketId: string): Promise<StoredPlayer | null>;
   getPublicGames(limit?: number): Promise<Array<Partial<GameData> & { playerCount: number, createdBy: string }>>;
-  destroy(): void; // Added destroy method to the interface
+  destroy(): void; 
 }
 
 class InMemoryGameStore implements GameStore {
@@ -57,11 +57,11 @@ class InMemoryGameStore implements GameStore {
     const gameData: GameData = {
       id: gameId,
       state: initialState,
-      players: [{ id: creatorSocketId, name: creatorName, playerId: 1 as PlayerId }],
+      players: [{ id: creatorSocketId, name: creatorName, playerId: 1 as PlayerId, isConnected: true }],
       lastActivity: Date.now(),
       options,
       sequenceId: 0,
-      createdAt: Date.now(), // Initialize createdAt
+      createdAt: Date.now(),
     };
 
     this.inMemoryGames.set(gameId, gameData);
@@ -70,7 +70,6 @@ class InMemoryGameStore implements GameStore {
   }
 
   private hydrateGameState(state: GameState): GameState {
-    // Ensure all complex types are properly instantiated if they were stringified/parsed
     return {
       ...state,
       playerColors: state.playerColors || assignPlayerColors(),
@@ -92,9 +91,6 @@ class InMemoryGameStore implements GameStore {
     const gameData = this.inMemoryGames.get(gameId);
     if (!gameData) return null;
     
-    // Deep copy to prevent direct modification of stored state if needed,
-    // though with in-memory, direct reference might be fine if careful.
-    // For simplicity, returning a structured clone to match potential DB behavior.
     const deepCopiedGameData = JSON.parse(JSON.stringify(gameData)) as GameData;
     deepCopiedGameData.state = this.hydrateGameState(deepCopiedGameData.state);
     return deepCopiedGameData;
@@ -106,7 +102,7 @@ class InMemoryGameStore implements GameStore {
       console.warn(`GameStore (in-memory): Attempted to update non-existent game: ${gameId}`);
       return false;
     }
-    game.state = this.hydrateGameState(state); // Ensure proper hydration
+    game.state = this.hydrateGameState(state); 
     game.lastActivity = Date.now();
     game.sequenceId++; 
     return true;
@@ -118,8 +114,8 @@ class InMemoryGameStore implements GameStore {
 
     const existingPlayer = gameData.players.find(p => p.id === socketId);
     if (existingPlayer) {
-      // Player is rejoining, update their name if changed, or just confirm presence
-      existingPlayer.name = playerName; // Update name if needed
+      existingPlayer.name = playerName; 
+      existingPlayer.isConnected = true;
       gameData.lastActivity = Date.now();
       return { success: true, assignedPlayerId: existingPlayer.playerId, existingPlayers: gameData.players };
     }
@@ -129,7 +125,7 @@ class InMemoryGameStore implements GameStore {
     }
     
     const assignedPlayerId = (gameData.players[0]?.playerId === 1 ? 2 : 1) as PlayerId;
-    gameData.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId });
+    gameData.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId, isConnected: true });
     gameData.lastActivity = Date.now();
 
     return { success: true, assignedPlayerId, existingPlayers: gameData.players };
@@ -147,13 +143,14 @@ class InMemoryGameStore implements GameStore {
     const playerIndex = game.players.findIndex(p => p.id === socketId);
     if (playerIndex === -1) return null;
     
-    const removedPlayer = game.players.splice(playerIndex, 1)[0];
+    const removedPlayer = { ...game.players[playerIndex], isConnected: false }; // Mark as disconnected
+    game.players[playerIndex].isConnected = false;
     game.lastActivity = Date.now();
 
-    // Optional: Delete game if no players are left
-    if (game.players.length === 0) {
-      this.deleteGame(gameId);
-    }
+    // Optional: Delete game if no players are connected for a while (handled by cleanup)
+    // if (game.players.every(p => !p.isConnected)) {
+    //   this.deleteGame(gameId);
+    // }
     return removedPlayer;
   }
   
@@ -161,17 +158,16 @@ class InMemoryGameStore implements GameStore {
     const publicGamesData: Array<Partial<GameData> & { playerCount: number, createdBy: string }> = [];
     let count = 0;
 
-    // Sort games by creation time (newest first)
     const sortedGames = Array.from(this.inMemoryGames.values())
-      .filter(game => game.options?.isPublic && game.players.length < 2) // Ensure options exists
-      .sort((a, b) => b.createdAt - a.createdAt); // Use createdAt for sorting
+      .filter(game => game.options?.isPublic && game.players.filter(p => p.isConnected).length < 2) 
+      .sort((a, b) => b.createdAt - a.createdAt); 
 
     for (const game of sortedGames) {
         publicGamesData.push({
           id: game.id,
-          createdBy: game.players[0]?.name || 'Unknown', // Handle case where players array might be empty
-          playerCount: game.players.length,
-          createdAt: game.createdAt, // Use game.createdAt
+          createdBy: game.players[0]?.name || 'Unknown', 
+          playerCount: game.players.filter(p => p.isConnected).length,
+          createdAt: game.createdAt, 
           options: game.options,
         });
         count++;
@@ -190,5 +186,4 @@ class InMemoryGameStore implements GameStore {
   }
 }
 
-// Export a singleton instance for use throughout the server-side application
 export const gameStore: GameStore = new InMemoryGameStore();

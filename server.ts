@@ -5,8 +5,7 @@ import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { setupGameSockets } from './src/lib/socketHandler';
 import { setupMatchmaking } from './src/lib/matchmaking';
-// Import the gameStore instance directly
-import { gameStore } from './src/lib/gameStore'; // GameStore is now in-memory
+import { gameStore } from './src/lib/gameStore'; 
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -45,11 +44,7 @@ app.prepare().then(async () => {
   
   console.log('Socket.IO: Using in-memory adapter. Multiplayer features will be limited to a single server instance.');
   
-  // Setup matchmaking system (now in-memory)
-  // Pass gameStore to matchmaking setup if it needs it
   setupMatchmaking(io, gameStore); 
-
-  // Pass the instantiated gameStore to setupGameSockets
   setupGameSockets(io, gameStore);
 
   server.listen(port, (err?: any) => {
@@ -65,31 +60,54 @@ app.prepare().then(async () => {
     console.error('Server error:', err);
     if (err.code === 'EADDRINUSE') {
       console.error(`Port ${port} is already in use. Please use a different port.`);
-      process.exit(1); // Exit if port is in use
+      process.exit(1); 
     }
   });
+
+  const gracefulShutdown = (signal: string) => {
+    console.log(`Received ${signal}. Initiating graceful shutdown...`);
+    
+    // Stop accepting new connections
+    server.close((err) => {
+      if (err) {
+        console.error('Error closing HTTP server:', err);
+        process.exit(1); // Exit with error if server close fails
+      }
+      console.log('HTTP server closed.');
+
+      // Cleanup game store
+      if (gameStore && typeof gameStore.destroy === 'function') {
+        try {
+          gameStore.destroy();
+          console.log('GameStore destroyed.');
+        } catch (storeError) {
+          console.error('Error destroying GameStore:', storeError);
+        }
+      }
+      
+      // Disconnect Socket.IO clients
+      io.close((ioErr) => {
+        if (ioErr) {
+          console.error('Error closing Socket.IO server:', ioErr);
+        } else {
+          console.log('Socket.IO server closed.');
+        }
+        // Exit process once all cleanup is done
+        process.exit(0);
+      });
+    });
+
+    // Force close server after timeout if graceful shutdown fails
+    setTimeout(() => {
+      console.error('Graceful shutdown timed out. Forcing exit.');
+      process.exit(1);
+    }, 10000); // 10 seconds timeout
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 }).catch(ex => {
   console.error("Error during app preparation or server start:", ex.stack || ex);
   process.exit(1);
 });
-
-const gracefulShutdown = () => {
-  console.log('Initiating graceful shutdown...');
-  // gameStore is now directly an instance of a class implementing GameStore interface
-  if (gameStore && typeof gameStore.destroy === 'function') {
-    gameStore.destroy(); // Call destroy on the GameStore instance
-  }
-  // Ensure other resources are cleaned up if necessary
-  // For example, close the HTTP server before exiting
-  // server.close(() => { // server might not be defined here if app.prepare() failed
-  //   console.log('HTTP server closed.');
-  //   process.exit(0);
-  // });
-  // A more robust way would be to ensure server is closed if it was started.
-  // For now, a direct exit after store cleanup for simplicity, assuming server closes on process exit.
-  process.exit(0);
-};
-
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);

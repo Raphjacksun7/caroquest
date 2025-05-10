@@ -1,18 +1,13 @@
+
 "use client";
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { GameState, PlayerId } from '@/lib/types'; 
+import type { GameState, PlayerId, StoredPlayer } from '@/lib/types'; 
 import { create } from 'zustand';
-import LZString from 'lz-string';
+// import LZString from 'lz-string'; // Removed LZString
 import { deserializeGameState } from '@/lib/serialization'; 
 import { applyDeltaUpdatesToGameState } from '@/lib/clientUtils'; 
-import { assignPlayerColors, PAWNS_PER_PLAYER } from '@/lib/gameLogic';
-
-export interface PlayerInfo {
-  id: string; 
-  name: string;
-  playerId: PlayerId;
-}
+import { assignPlayerColors, PAWNS_PER_PLAYER, createInitialGameState as createClientInitialGameState } from '@/lib/gameLogic';
 
 export interface GameStoreState {
   gameState: GameState | null;
@@ -24,11 +19,11 @@ export interface GameStoreState {
   isConnecting: boolean; 
   isWaitingForOpponent: boolean;
   pingLatency: number;
-  players: PlayerInfo[]; 
+  players: StoredPlayer[]; 
   setGameState: (state: GameState | null) => void;
   setError: (error: string | null) => void;
   applyDeltaUpdates: (updates: any[], seqId?: number) => void; 
-  setPlayers: (players: PlayerInfo[]) => void;
+  setPlayers: (players: StoredPlayer[]) => void;
   setGameId: (gameId: string | null) => void;
   setLocalPlayerId: (playerId: PlayerId | null) => void;
   setOpponentName: (name: string | null) => void;
@@ -91,11 +86,11 @@ const useGameStore = create<GameStoreState>((set, get) => ({
   setPingLatency: (latency) => set({ pingLatency: latency }),
   clearStore: () => set({
     gameState: null, localPlayerId: null, opponentName: null, gameId: null, error: null,
-    // isConnected: get().isConnected, // Preserve connection status if needed, or reset
     isConnecting: false, isWaitingForOpponent: false, pingLatency: 0, players: [],
   }),
   resetForNewGame: () => set({ 
-    gameState: null, localPlayerId: null, opponentName: null, gameId: null, error: null,
+    gameState: createClientInitialGameState(), // Use a client-side initial state for immediate UI update
+    localPlayerId: null, opponentName: null, gameId: null, error: null,
     isWaitingForOpponent: false, pingLatency: 0, players: [],
   }),
 }));
@@ -113,7 +108,6 @@ export function useGameConnection() {
   const lastPingSent = useRef<number | null>(null);
   const serverTimeOffset = useRef<number>(0);
 
-  // Destructure actions and state from the store
   const {
     gameState, localPlayerId, opponentName, gameId, error,
     isConnected, isConnecting, isWaitingForOpponent, pingLatency, players,
@@ -127,7 +121,7 @@ export function useGameConnection() {
     if (!socketRef.current || !socketRef.current.connected) return;
     lastPingSent.current = Date.now();
     socketRef.current.emit('ping_time');
-  }, []); // Depends only on socketRef, which is stable
+  }, []); 
 
   const connectSocket = useCallback(() => {
     if (socketRef.current && socketRef.current.connected) {
@@ -158,6 +152,7 @@ export function useGameConnection() {
         newSocket.on('connect', () => {
             console.log('Socket.IO: Connected to game server with ID:', newSocket.id);
             setIsConnected(true);
+            setIsConnecting(false);
             syncTime();
             resolve(newSocket);
         });
@@ -165,6 +160,7 @@ export function useGameConnection() {
         newSocket.on('disconnect', (reason) => {
             console.log('Socket.IO: Disconnected from game server:', reason);
             setIsConnected(false);
+            setIsConnecting(false);
             if (reason !== 'io client disconnect' && reason !== 'io server disconnect') { 
                 setError(`Disconnected: ${reason}. Please check your connection or try again.`);
             }
@@ -181,14 +177,14 @@ export function useGameConnection() {
             reject(err);
         });
     });
-  }, [isConnecting, setIsConnected, setIsConnecting, setError, syncTime]); // Dependencies are stable actions or primitive states
+  }, [isConnecting, setIsConnected, setIsConnecting, setError, syncTime]); 
 
-  // Effect for establishing and cleaning up the socket connection
   useEffect(() => {
-    if (!socketRef.current && !isConnecting && !isConnected) {
-      connectSocket().catch(err => {
-        console.warn("Socket.IO: Initial connection attempt failed in setup effect.", err.message);
-      });
+    // This effect now only runs once on mount to potentially initiate connection
+    // if not already connected or connecting. It doesn't actively try to reconnect here.
+    if (!socketRef.current && !isConnecting && !isConnected && typeof window !== 'undefined') {
+      // Only attempt to connect if not already doing so.
+      // The actual connection logic is now in connectSocket, called by user actions.
     }
     
     return () => {
@@ -196,13 +192,12 @@ export function useGameConnection() {
         console.log("Socket.IO: Disconnecting socket from useGameConnection cleanup.");
         socketRef.current.disconnect();
         socketRef.current = null;
-        setIsConnected(false);
-        // clearStore(); // Consider if this is always appropriate on unmount
+        // Keep isConnected and isConnecting as they are, they reflect the last known state.
+        // clearStore(); // Don't clear store on every unmount, only on explicit disconnect.
       }
     };
-  }, [connectSocket, isConnecting, isConnected, setIsConnected]); // Depends on stable connectSocket and primitive states
+  }, [isConnecting, isConnected]); // Removed connectSocket from deps to avoid re-triggering
 
-  // Effect for setting up socket event listeners
   useEffect(() => {
     const currentSocket = socketRef.current;
     if (!currentSocket || !isConnected) return;
@@ -217,60 +212,60 @@ export function useGameConnection() {
       }
     };
     
-    const handleCompressedState = (compressedStateAsArray: number[], origin: string): GameState | null => {
+    const handleSerializedState = (serializedStateAsArray: number[], origin: string): GameState | null => {
       try {
-        if (!Array.isArray(compressedStateAsArray)) {
+        if (!Array.isArray(serializedStateAsArray)) {
             throw new Error("Received game state is not an array as expected.");
         }
-        const uint8ArrayState = new Uint8Array(compressedStateAsArray);
-        const binaryState = LZString.decompressFromUint8Array(uint8ArrayState);
-        if (!binaryState) throw new Error("Failed to decompress game state.");
-        const deserialized = deserializeGameState(binaryState); 
+        const uint8ArrayState = new Uint8Array(serializedStateAsArray);
+        // const binaryState = LZString.decompressFromUint8Array(uint8ArrayState); // Removed LZString
+        // if (!binaryState) throw new Error("Failed to decompress game state.");
+        const deserialized = deserializeGameState(uint8ArrayState); // Directly deserialize Uint8Array 
         if (typeof deserialized !== 'object' || deserialized === null) {
             throw new Error("Deserialized game state is not a valid object.");
         }
         return deserialized;
       } catch (error: any) {
-        console.error(`Error processing compressed game state from ${origin}:`, error);
+        console.error(`Error processing serialized game state from ${origin}:`, error);
         setError(`Failed to process game data from ${origin}: ${error.message}`);
         return null;
       }
     };
     
-    const handleGameCreated = ({ gameId: newGameId, playerId: newPlayerId, gameState: compressedGameStateArr, players: newPlayers, timestamp }: { gameId: string; playerId: PlayerId; gameState: number[]; players: PlayerInfo[], timestamp: number }) => {
-      const decodedState = handleCompressedState(compressedGameStateArr, 'game_created');
+    const handleGameCreated = ({ gameId: newGameId, playerId: newPlayerId, gameState: serializedArr, players: newPlayers, timestamp }: { gameId: string; playerId: PlayerId; gameState: number[]; players: StoredPlayer[], timestamp: number }) => {
+      const decodedState = handleSerializedState(serializedArr, 'game_created');
       if (decodedState) {
         setGameId(newGameId);
         setLocalPlayerId(newPlayerId);
         setGameState(decodedState);
         setPlayers(newPlayers);
-        setIsWaitingForOpponent(newPlayers.length < 2);
+        setIsWaitingForOpponent(newPlayers.filter(p=>p.isConnected).length < 2);
         setError(null);
       }
     };
 
-    const handleGameJoined = ({ gameId: joinedGameId, playerId: joinedPlayerId, gameState: compressedGameStateArr, players: joinedPlayers, opponentName: joinedOpponentName, timestamp }: { gameId: string; playerId: PlayerId; gameState: number[]; players: PlayerInfo[], opponentName: string | null, timestamp: number }) => {
-       const decodedState = handleCompressedState(compressedGameStateArr, 'game_joined');
+    const handleGameJoined = ({ gameId: joinedGameId, playerId: joinedPlayerId, gameState: serializedArr, players: joinedPlayers, opponentName: joinedOpponentName, timestamp }: { gameId: string; playerId: PlayerId; gameState: number[]; players: StoredPlayer[], opponentName: string | null, timestamp: number }) => {
+       const decodedState = handleSerializedState(serializedArr, 'game_joined');
        if (decodedState) {
         setGameId(joinedGameId);
         setLocalPlayerId(joinedPlayerId);
         setGameState(decodedState);
         setPlayers(joinedPlayers);
         setOpponentName(joinedOpponentName);
-        setIsWaitingForOpponent(joinedPlayers.length < 2 && !joinedOpponentName);
+        setIsWaitingForOpponent(joinedPlayers.filter(p=>p.isConnected).length < 2 && !joinedOpponentName);
         setError(null);
       }
     };
 
-    const handleOpponentJoined = ({ opponentName: newOpponentName, players: updatedPlayers, timestamp }: { opponentName: string; players: PlayerInfo[], timestamp: number}) => {
+    const handleOpponentJoined = ({ opponentName: newOpponentName, players: updatedPlayers, timestamp }: { opponentName: string; players: StoredPlayer[], timestamp: number}) => {
         setOpponentName(newOpponentName);
         setPlayers(updatedPlayers);
         setIsWaitingForOpponent(false);
         setError(null);
     };
     
-    const handleGameStart = ({ gameState: compressedGameStateArr, players: gameStartPlayers, timestamp }: { gameState: number[]; players: PlayerInfo[], timestamp: number }) => {
-        const decodedState = handleCompressedState(compressedGameStateArr, 'game_start');
+    const handleGameStart = ({ gameState: serializedArr, players: gameStartPlayers, timestamp }: { gameState: number[]; players: StoredPlayer[], timestamp: number }) => {
+        const decodedState = handleSerializedState(serializedArr, 'game_start');
         if (decodedState) {
             setGameState(decodedState);
             setPlayers(gameStartPlayers);
@@ -279,8 +274,8 @@ export function useGameConnection() {
         }
     };
     
-    const handleGameUpdated = ({ gameState: compressedGameStateArr, timestamp, fullUpdate }: { gameState: number[]; timestamp: number; fullUpdate?: boolean}) => {
-        const decodedState = handleCompressedState(compressedGameStateArr, 'game_updated (full)');
+    const handleGameUpdated = ({ gameState: serializedArr, timestamp, fullUpdate }: { gameState: number[]; timestamp: number; fullUpdate?: boolean}) => {
+        const decodedState = handleSerializedState(serializedArr, 'game_updated (full)');
         if (decodedState) {
             setGameState(decodedState);
             setError(null);
@@ -294,13 +289,13 @@ export function useGameConnection() {
         } catch (error: any) {
             console.error('Error processing game_delta:', error);
             setError(`Failed to apply update: ${error.message}. Requesting full state.`);
-            if (socketRef.current && gameId) { // Use gameId from store
+            if (socketRef.current && gameId) { 
               socketRef.current.emit('request_full_state', { gameId });
             }
         }
     };
     
-    const handleOpponentDisconnected = ({ playerName, playerId: disconnectedPlayerId, remainingPlayers, timestamp }: { playerName: string; playerId: PlayerId; remainingPlayers: PlayerInfo[], timestamp: number }) => {
+    const handleOpponentDisconnected = ({ playerName, playerId: disconnectedPlayerId, remainingPlayers, timestamp }: { playerName: string; playerId: PlayerId; remainingPlayers: StoredPlayer[], timestamp: number }) => {
         setError(`${playerName} has disconnected. Waiting for them to rejoin or for a new opponent.`);
         setPlayers(remainingPlayers);
         if(localPlayerId !== disconnectedPlayerId) { 
@@ -360,11 +355,11 @@ export function useGameConnection() {
       currentSocket.off('match_found', handleMatchFound);
     };
   }, [
-      isConnected, // Re-bind if connection status changes and socket exists
+      isConnected, 
       syncTime, 
       setPingLatency, setError, setGameState, setPlayers, setGameId, 
       setLocalPlayerId, setOpponentName, setIsWaitingForOpponent, storeApplyDeltaUpdates,
-      gameId, localPlayerId // Include specific state values read by handlers if they influence handler logic beyond store updates
+      gameId, localPlayerId 
     ]
   ); 
   
@@ -414,10 +409,11 @@ export function useGameConnection() {
   const disconnect = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.disconnect();
-      setIsConnected(false);
-      clearStore(); 
+      setIsConnected(false); // Update connection state immediately
+      setIsConnecting(false); // Ensure connecting state is also false
+      // clearStore(); // Consider if this should clear all game data or just connection related
     }
-  }, [setIsConnected, clearStore]);
+  }, [setIsConnected, setIsConnecting]); // Added setIsConnecting
 
   const joinMatchmakingQueue = useCallback(async (playerName: string, rating?: number) => {
     if (!playerName || playerName.trim() === "") {
