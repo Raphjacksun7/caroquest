@@ -35,4 +35,19 @@ export interface GameState {
   winningLine: number[] | null; 
   highlightedValidMoves?: number[];
 }
+
+// Added from gameStore.ts for broader use
+export interface StoredPlayer {
+  id: string; // Socket ID
+  name: string;
+  playerId: PlayerId; 
+}
+
+export interface GameOptions {
+  isPublic?: boolean; 
+  gameIdToCreate?: string;
+  pawnsPerPlayer?: number;
+  isMatchmaking?: boolean; 
+  isRanked?: boolean;      
+}
     

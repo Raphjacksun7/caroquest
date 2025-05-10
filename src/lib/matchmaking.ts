@@ -1,101 +1,102 @@
 
 import type { Server as SocketIOServer, Socket } from 'socket.io';
-import type { GameStore } from './gameStore';
-import type { PlayerId } from './types'; // Assuming PlayerId is in types.ts
+import type { GameStore, GameOptions } from './gameStore'; // Ensure GameOptions is imported
+import type { PlayerId, StoredPlayer } from './types'; 
 
 interface MatchmakingPlayer {
   socketId: string;
   name: string;
-  rating: number; // Example, could be more complex
+  rating: number; 
   joinTime: number;
+  socket: Socket; // Keep a reference to the socket for direct emits
 }
 
-// In-memory queue for matchmaking
 const matchmakingQueue: MatchmakingPlayer[] = [];
 let matchmakingInterval: NodeJS.Timeout | null = null;
 
-export function setupMatchmaking(gameStore: GameStore, io: SocketIOServer) {
-  console.log('Matchmaking: Using in-memory queue.');
+export function setupMatchmaking(io: SocketIOServer, gameStore: GameStore) {
+  console.log('Matchmaking: Initialized with in-memory queue.');
 
   if (matchmakingInterval) {
     clearInterval(matchmakingInterval);
   }
 
-  // Simple matchmaking: pair the first two players in the queue
   matchmakingInterval = setInterval(async () => {
     if (matchmakingQueue.length >= 2) {
-      // Sort by join time to be fair (FIFO)
-      matchmakingQueue.sort((a, b) => a.joinTime - b.joinTime);
+      matchmakingQueue.sort((a, b) => a.joinTime - b.joinTime); // FIFO
       
-      const player1 = matchmakingQueue.shift();
-      const player2 = matchmakingQueue.shift();
+      const player1Entry = matchmakingQueue.shift();
+      const player2Entry = matchmakingQueue.shift();
 
-      if (player1 && player2) {
+      if (player1Entry && player2Entry) {
         try {
-          const gameId = await gameStore.createGame(player1.socketId, player1.name, { 
+          const gameOptions: GameOptions = { 
             isMatchmaking: true, 
-            isRanked: true // Example option
-          });
+            isPublic: false, // Matchmade games are typically not browsable public games
+            // isRanked: true // Example option
+          };
+          const gameId = gameStore.createGame(player1Entry.socketId, player1Entry.name, gameOptions);
           
-          // Player 2 joins the game created by Player 1
-          const joinResult = await gameStore.addPlayerToGame(gameId, player2.socketId, player2.name);
+          const joinResult = await gameStore.addPlayerToGame(gameId, player2Entry.socketId, player2Entry.name);
 
           if (joinResult.success && joinResult.assignedPlayerId !== undefined) {
-            console.log(`Matchmaking: Matched ${player1.name} vs ${player2.name} in game ${gameId}`);
+            console.log(`Matchmaking: Matched ${player1Entry.name} vs ${player2Entry.name} in game ${gameId}`);
             
-            // Notify players
-            const player1Socket = io.sockets.sockets.get(player1.socketId);
-            const player2Socket = io.sockets.sockets.get(player2.socketId);
+            // Ensure game data is fresh after updates
+            const finalGameData = await gameStore.getGame(gameId);
+            if (!finalGameData) {
+                throw new Error("Failed to retrieve game data after match creation.");
+            }
 
-            if (player1Socket) {
-              player1Socket.emit('match_found', { 
-                gameId, 
-                opponentName: player2.name, 
-                assignedPlayerId: 1 as PlayerId // Creator is always P1
-              });
+            const assignedP1Id = finalGameData.players.find(p=>p.id === player1Entry.socketId)?.playerId;
+            const assignedP2Id = finalGameData.players.find(p=>p.id === player2Entry.socketId)?.playerId;
+
+            if(assignedP1Id) {
+                player1Entry.socket.emit('match_found', { 
+                    gameId, 
+                    opponentName: player2Entry.name, 
+                    assignedPlayerId: assignedP1Id
+                });
             }
-            if (player2Socket) {
-              player2Socket.emit('match_found', { 
-                gameId, 
-                opponentName: player1.name, 
-                assignedPlayerId: joinResult.assignedPlayerId 
-              });
+            if(assignedP2Id){
+                player2Entry.socket.emit('match_found', { 
+                    gameId, 
+                    opponentName: player1Entry.name, 
+                    assignedPlayerId: assignedP2Id
+                });
             }
+
           } else {
-            console.error(`Matchmaking: Failed to join player ${player2.name} to game ${gameId}. Re-queuing.`);
-            // Re-add players to queue if game setup failed
-            if (player1) matchmakingQueue.unshift(player1); 
-            if (player2) matchmakingQueue.unshift(player2);
+            console.error(`Matchmaking: Failed to join player ${player2Entry.name} to game ${gameId}. Re-queuing.`);
+            if (player1Entry) matchmakingQueue.unshift(player1Entry); 
+            if (player2Entry) matchmakingQueue.unshift(player2Entry);
           }
         } catch (error) {
           console.error('Matchmaking: Error creating or joining game for matched players:', error);
-          // Re-add players to queue on error
-          if (player1) matchmakingQueue.unshift(player1);
-          if (player2) matchmakingQueue.unshift(player2);
+          if (player1Entry) matchmakingQueue.unshift(player1Entry);
+          if (player2Entry) matchmakingQueue.unshift(player2Entry);
         }
       }
     }
-  }, 5000); // Check every 5 seconds
+  }, 5000); 
 
-  // Clean up interval on shutdown (if server.ts calls a destroy method)
   return () => {
     if (matchmakingInterval) {
       clearInterval(matchmakingInterval);
       matchmakingInterval = null;
     }
-    matchmakingQueue.length = 0; // Clear queue
+    matchmakingQueue.length = 0; 
     console.log('Matchmaking: Stopped and cleared in-memory queue.');
   };
 }
 
 export function addToMatchmakingQueue(socket: Socket, playerName: string, rating: number = 1000) {
-  // Prevent duplicate entries
   if (matchmakingQueue.some(p => p.socketId === socket.id)) {
     socket.emit('matchmaking_error', { message: 'Already in queue.' });
     return;
   }
   
-  const player: MatchmakingPlayer = { socketId: socket.id, name: playerName, rating, joinTime: Date.now() };
+  const player: MatchmakingPlayer = { socketId: socket.id, name: playerName, rating, joinTime: Date.now(), socket };
   matchmakingQueue.push(player);
   socket.emit('matchmaking_joined', { 
     message: 'Added to matchmaking queue.', 
@@ -104,10 +105,11 @@ export function addToMatchmakingQueue(socket: Socket, playerName: string, rating
   console.log(`Matchmaking: ${playerName} (ID: ${socket.id}) added to queue. Queue size: ${matchmakingQueue.length}`);
 }
 
-export function removeFromMatchmakingQueue(socketId: string) {
+export function removeFromMatchmakingQueue(socketId: string): boolean {
   const index = matchmakingQueue.findIndex(p => p.socketId === socketId);
   if (index > -1) {
-    matchmakingQueue.splice(index, 1);
+    const removedPlayer = matchmakingQueue.splice(index, 1)[0];
+    removedPlayer.socket.emit('matchmaking_left', { message: 'Removed from queue by server or disconnect.' });
     console.log(`Matchmaking: Player ${socketId} removed from queue. Queue size: ${matchmakingQueue.length}`);
     return true;
   }

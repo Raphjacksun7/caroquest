@@ -4,15 +4,16 @@ import { parse } from 'url';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { setupGameSockets } from './src/lib/socketHandler';
+import { setupMatchmaking } from './src/lib/matchmaking'; // Assuming this will also be in-memory
 import { GameStore } from './src/lib/gameStore';
+
+// Initialize in-memory game store
+const gameStore = new GameStore(); 
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 const port = parseInt(process.env.PORT || "3000", 10);
-
-// Initialize in-memory game store
-const gameStore = new GameStore(); // Ensure GameStore is instantiated
 
 app.prepare().then(async () => {
   const server = createServer((req, res) => {
@@ -28,7 +29,7 @@ app.prepare().then(async () => {
 
   const io = new SocketIOServer(server, {
     cors: {
-      origin: "*", // Allow all origins for Socket.IO in development
+      origin: "*", 
       methods: ["GET", "POST"]
     },
     perMessageDeflate: {
@@ -45,6 +46,9 @@ app.prepare().then(async () => {
   
   console.log('Socket.IO: Using in-memory adapter. Multiplayer features will be limited to a single server instance.');
   
+  // Setup matchmaking system (now in-memory)
+  setupMatchmaking(io, gameStore);
+
   // Pass the instantiated gameStore to setupGameSockets
   setupGameSockets(io, gameStore);
 
@@ -71,6 +75,7 @@ app.prepare().then(async () => {
 
 const gracefulShutdown = () => {
   console.log('Initiating graceful shutdown...');
+  // gameStore.destroy() might be needed if it held resources like intervals
   if (gameStore && typeof gameStore.destroy === 'function') {
     gameStore.destroy(); 
   }
