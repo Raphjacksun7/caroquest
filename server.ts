@@ -67,41 +67,36 @@ app.prepare().then(async () => {
   const gracefulShutdown = (signal: string) => {
     console.log(`Received ${signal}. Initiating graceful shutdown...`);
     
-    // Stop accepting new connections
     server.close((err) => {
       if (err) {
         console.error('Error closing HTTP server:', err);
-        process.exit(1); // Exit with error if server close fails
+        process.exit(1); 
       }
       console.log('HTTP server closed.');
 
-      // Cleanup game store
       if (gameStore && typeof gameStore.destroy === 'function') {
         try {
-          gameStore.destroy();
+          gameStore.destroy(); 
           console.log('GameStore destroyed.');
         } catch (storeError) {
           console.error('Error destroying GameStore:', storeError);
         }
       }
       
-      // Disconnect Socket.IO clients
       io.close((ioErr) => {
         if (ioErr) {
           console.error('Error closing Socket.IO server:', ioErr);
         } else {
           console.log('Socket.IO server closed.');
         }
-        // Exit process once all cleanup is done
         process.exit(0);
       });
     });
 
-    // Force close server after timeout if graceful shutdown fails
     setTimeout(() => {
       console.error('Graceful shutdown timed out. Forcing exit.');
       process.exit(1);
-    }, 10000); // 10 seconds timeout
+    }, 10000); 
   };
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

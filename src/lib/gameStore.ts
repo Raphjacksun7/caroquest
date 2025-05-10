@@ -12,7 +12,7 @@ interface GameData {
   lastActivity: number;
   options: GameOptions;
   sequenceId: number;
-  createdAt: number; 
+  createdAt: number;
 }
 
 export interface GameStore {
@@ -58,7 +58,7 @@ class InMemoryGameStore implements GameStore {
     const gameData: GameData = {
       id: gameId,
       state: initialState,
-      players: [{ id: creatorSocketId, name: creatorName, playerId: 1 as PlayerId, isConnected: true, isCreator: true }],
+      players: [{ id: creatorSocketId, name: creatorName, playerId: 1 as PlayerId, isConnected: true, isCreator: true, rating: options.isRanked ? 1000: undefined }],
       lastActivity: Date.now(),
       options,
       sequenceId: 0,
@@ -71,8 +71,6 @@ class InMemoryGameStore implements GameStore {
   }
 
   private hydrateGameState(state: GameState): GameState {
-    // Ensure all Set/Map fields are correctly initialized if they are undefined/null from a faulty source
-    // or if they were stringified and lost their type.
     return {
       ...state,
       playerColors: state.playerColors || assignPlayerColors(),
@@ -80,9 +78,9 @@ class InMemoryGameStore implements GameStore {
       blockingPawnsInfo: new Set(Array.from(state.blockingPawnsInfo || [])),
       deadZoneSquares: new Map(
         (Array.isArray(state.deadZoneSquares) 
-          ? state.deadZoneSquares // Assumes it's already an array of [number, PlayerId] entries
-          : Object.entries(state.deadZoneSquares || {}) // Handles if it was an object
-        ).map(([k, v]: [string | number, PlayerId]) => [Number(k),v]) // Ensure key is number
+          ? state.deadZoneSquares 
+          : Object.entries(state.deadZoneSquares || {})
+        ).map(([k, v]: [string | number, PlayerId]) => [Number(k),v]) 
       ),
       deadZoneCreatorPawnsInfo: new Set(Array.from(state.deadZoneCreatorPawnsInfo || [])),
       pawnsToPlace: state.pawnsToPlace || {1: PAWNS_PER_PLAYER, 2: PAWNS_PER_PLAYER},
@@ -94,9 +92,8 @@ class InMemoryGameStore implements GameStore {
     const gameData = this.inMemoryGames.get(gameId);
     if (!gameData) return null;
     
-    // Deep copy and hydrate to ensure data integrity and correct types for consumers
     const deepCopiedGameData = JSON.parse(JSON.stringify(gameData)) as GameData;
-    deepCopiedGameData.state = this.hydrateGameState(deepCopiedGameData.state); // Ensure state is hydrated
+    deepCopiedGameData.state = this.hydrateGameState(deepCopiedGameData.state); 
     return deepCopiedGameData;
   }
 
@@ -106,7 +103,7 @@ class InMemoryGameStore implements GameStore {
       console.warn(`GameStore (in-memory): Attempted to update non-existent game: ${gameId}`);
       return false;
     }
-    game.state = this.hydrateGameState(state); // Ensure state is hydrated on update
+    game.state = this.hydrateGameState(state); 
     game.lastActivity = Date.now();
     game.sequenceId++; 
     return true;
@@ -118,7 +115,7 @@ class InMemoryGameStore implements GameStore {
 
     const existingPlayer = gameData.players.find(p => p.id === socketId);
     if (existingPlayer) {
-      existingPlayer.name = playerName; // Allow name update on rejoin
+      existingPlayer.name = playerName; 
       existingPlayer.isConnected = true;
       gameData.lastActivity = Date.now();
       return { success: true, assignedPlayerId: existingPlayer.playerId, existingPlayers: gameData.players };
@@ -128,9 +125,8 @@ class InMemoryGameStore implements GameStore {
       return { success: false, error: 'Game is full.' };
     }
     
-    // Assign playerId 2 if player 1 (creator) exists, otherwise default to 1 (should not happen if createGame sets creator)
     const assignedPlayerId = (gameData.players[0]?.playerId === 1 ? 2 : 1) as PlayerId;
-    gameData.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId, isConnected: true, isCreator: false });
+    gameData.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId, isConnected: true, isCreator: false, rating: gameData.options.isRanked ? 1000: undefined });
     gameData.lastActivity = Date.now();
 
     return { success: true, assignedPlayerId, existingPlayers: gameData.players };
@@ -138,6 +134,7 @@ class InMemoryGameStore implements GameStore {
 
   public async deleteGame(gameId: string): Promise<void> {
     this.inMemoryGames.delete(gameId);
+    gamePreviousStates.delete(gameId); // Also remove from previousStates cache in socketHandler
     console.log(`GameStore (in-memory): Deleted game ${gameId}`);
   }
 
@@ -149,13 +146,12 @@ class InMemoryGameStore implements GameStore {
     if (playerIndex === -1) return null;
     
     const removedPlayer = { ...game.players[playerIndex], isConnected: false }; 
-    game.players[playerIndex].isConnected = false; // Mark as disconnected
+    game.players[playerIndex].isConnected = false; 
     game.lastActivity = Date.now();
-
-    // Delete game if all players are disconnected after a short delay (or let cleanup handle it)
-    // if (game.players.every(p => !p.isConnected)) {
-    //   this.deleteGame(gameId);
-    // }
+    
+    if (game.players.every(p => !p.isConnected)) {
+        console.log(`GameStore (in-memory): All players disconnected from game ${gameId}. It will be cleaned up if inactive.`);
+    }
     return removedPlayer;
   }
   
@@ -163,7 +159,6 @@ class InMemoryGameStore implements GameStore {
     const publicGamesData: Array<Partial<GameData> & { playerCount: number, createdBy: string }> = [];
     let count = 0;
 
-    // Filter for public, non-full games and sort by creation time (newest first)
     const sortedGames = Array.from(this.inMemoryGames.values())
       .filter(game => game.options?.isPublic && game.players.filter(p => p.isConnected).length < 2) 
       .sort((a, b) => b.createdAt - a.createdAt); 
@@ -188,9 +183,12 @@ class InMemoryGameStore implements GameStore {
       this.cleanupInterval = null;
     }
     this.inMemoryGames.clear();
+    gamePreviousStates.clear();
     console.log('GameStore (in-memory): Destroyed and cleared all games.');
   }
 }
 
 // Export a singleton instance
 export const gameStore: GameStore = new InMemoryGameStore();
+// Cache for previous game states used for delta updates
+export const gamePreviousStates = new Map<string, GameState>();

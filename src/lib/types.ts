@@ -40,7 +40,9 @@ export interface StoredPlayer {
   id: string; // Socket ID
   name: string;
   playerId: PlayerId; 
-  isConnected: boolean; // To track connection status
+  isConnected: boolean; 
+  isCreator: boolean;
+  rating?: number; // Optional rating for matchmaking
 }
 
 export interface GameOptions {
