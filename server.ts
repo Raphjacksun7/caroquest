@@ -6,13 +6,12 @@ import { Server as SocketIOServer } from 'socket.io';
 import { setupGameSockets } from './src/lib/socketHandler';
 import { setupMatchmaking } from './src/lib/matchmaking';
 // Import the gameStore instance directly
-import { gameStore } from './src/lib/gameStore';
+import { gameStore } from './src/lib/gameStore'; // GameStore is now in-memory
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-// Ensure PORT environment variable is used, or default to 3000
 const port = parseInt(process.env.PORT || "3000", 10);
 
 app.prepare().then(async () => {
@@ -47,7 +46,8 @@ app.prepare().then(async () => {
   console.log('Socket.IO: Using in-memory adapter. Multiplayer features will be limited to a single server instance.');
   
   // Setup matchmaking system (now in-memory)
-  setupMatchmaking(io, gameStore);
+  // Pass gameStore to matchmaking setup if it needs it
+  setupMatchmaking(io, gameStore); 
 
   // Pass the instantiated gameStore to setupGameSockets
   setupGameSockets(io, gameStore);
@@ -65,6 +65,7 @@ app.prepare().then(async () => {
     console.error('Server error:', err);
     if (err.code === 'EADDRINUSE') {
       console.error(`Port ${port} is already in use. Please use a different port.`);
+      process.exit(1); // Exit if port is in use
     }
   });
 
@@ -77,9 +78,16 @@ const gracefulShutdown = () => {
   console.log('Initiating graceful shutdown...');
   // gameStore is now directly an instance of a class implementing GameStore interface
   if (gameStore && typeof gameStore.destroy === 'function') {
-    gameStore.destroy();
+    gameStore.destroy(); // Call destroy on the GameStore instance
   }
   // Ensure other resources are cleaned up if necessary
+  // For example, close the HTTP server before exiting
+  // server.close(() => { // server might not be defined here if app.prepare() failed
+  //   console.log('HTTP server closed.');
+  //   process.exit(0);
+  // });
+  // A more robust way would be to ensure server is closed if it was started.
+  // For now, a direct exit after store cleanup for simplicity, assuming server closes on process exit.
   process.exit(0);
 };
 

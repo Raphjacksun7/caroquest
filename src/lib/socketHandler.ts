@@ -3,18 +3,15 @@ import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { GameStore } from './gameStore'; 
 import { 
   serializeGameState, 
-  // deserializeGameState is client-side
   createDeltaUpdate 
 } from './serialization';
 import { 
-  placePawn, 
-  movePawn, 
-  GameState,
-  PlayerId,
-  GameOptions,
-  StoredPlayer
-} from './types'; // Ensure GameOptions and StoredPlayer are imported from types
-import LZString from 'lz-string'; // Assuming LZString is still used for compression
+  createInitialGameState, // Make sure this is exported from gameLogic if used here
+  placePawn as placePawnLogic, // Alias to avoid conflict if there's a local 'placePawn'
+  movePawn as movePawnLogic   // Alias to avoid conflict
+} from './gameLogic'; // Corrected import path
+import type { GameState, PlayerId, GameOptions, StoredPlayer } from './types';
+import LZString from 'lz-string';
 
 const RATE_LIMIT_CONFIG = {
   maxRequests: 20, 
@@ -77,7 +74,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
           return;
         }
         
-        const gameId = gameStore.createGame(socket.id, playerName.trim(), options); // GameStore now returns string
+        const gameId = await gameStore.createGame(socket.id, playerName.trim(), options);
         const game = await gameStore.getGame(gameId);
         
         if (!game) {
@@ -95,7 +92,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
         socket.emit('game_created', { 
           gameId, 
           playerId: 1 as PlayerId, 
-          gameState: Array.from(compressedState), 
+          gameState: Array.from(compressedState), // Convert Uint8Array to number[]
           players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
           timestamp: Date.now()
         });
@@ -131,7 +128,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
             socket.emit('game_joined', { 
               gameId, 
               playerId: existingPlayer.playerId, 
-              gameState: Array.from(compressedState),
+              gameState: Array.from(compressedState), // Convert Uint8Array to number[]
               players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
               opponentName: game.players.find(p => p.id !== socket.id)?.name || null,
               timestamp: Date.now()
@@ -167,7 +164,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
         socket.emit('game_joined', { 
           gameId, 
           playerId: result.assignedPlayerId, 
-          gameState: Array.from(compressedStateOnJoin),
+          gameState: Array.from(compressedStateOnJoin), // Convert Uint8Array to number[]
           players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
           opponentName: updatedGame.players.find(p => p.id !== socket.id)?.name || null,
           timestamp: Date.now()
@@ -182,7 +179,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
         
         if (updatedGame.players.length === 2) {
             const gameStartPayload = { 
-                gameState: Array.from(compressedStateOnJoin),
+                gameState: Array.from(compressedStateOnJoin), // Convert Uint8Array to number[]
                 players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
                 timestamp: Date.now() 
             };
@@ -227,9 +224,9 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
           const currentGameState = game.state; 
 
           if (actionType === 'place_pawn' && typeof actionData.squareIndex === 'number') {
-            newState = placePawn(currentGameState, actionData.squareIndex);
+            newState = placePawnLogic(currentGameState, actionData.squareIndex);
           } else if (actionType === 'move_pawn' && typeof actionData.fromIndex === 'number' && typeof actionData.toIndex === 'number') {
-            newState = movePawn(currentGameState, actionData.fromIndex, actionData.toIndex);
+            newState = movePawnLogic(currentGameState, actionData.fromIndex, actionData.toIndex);
           }
 
           if (!newState) {
@@ -251,10 +248,10 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
           const shouldSendFullState = updatedGame.sequenceId % 10 === 0 || deltaUpdates.length > 10;
 
           if (shouldSendFullState) {
-            const binaryStateFull = serializeGameState(newState); // Correctly scoped
-            const compressedStateFull = LZString.compressToUint8Array(binaryStateFull);
+            const binaryStateFull = serializeGameState(newState);
+            const compressedStateFull = LZString.compressToUint8Array(binaryStateFull); // Corrected variable name
             io.to(gameId).emit('game_updated', { 
-              gameState: Array.from(compressedStateFull),
+              gameState: Array.from(compressedStateFull), // Convert Uint8Array to number[]
               timestamp: Date.now(),
               fullUpdate: true 
             });
@@ -278,10 +275,10 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
       try {
         const game = await gameStore.getGame(gameId);
         if (game) {
-            const binaryStateFull = serializeGameState(game.state); // Correctly scoped
+            const binaryStateFull = serializeGameState(game.state);
             const compressedStateFull = LZString.compressToUint8Array(binaryStateFull);
             const fullStateData = { 
-                gameState: Array.from(compressedStateFull),
+                gameState: Array.from(compressedStateFull), // Convert Uint8Array to number[]
                 timestamp: Date.now(),
                 fullUpdate: true
             };
