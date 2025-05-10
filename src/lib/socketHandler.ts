@@ -1,50 +1,51 @@
 
 import type { Server as SocketIOServer, Socket } from 'socket.io';
-// import type { Redis } from 'ioredis'; // Redis removed
-import type { GameStore, StoredPlayer } from './gameStore'; 
+import type { Redis } from 'ioredis';
+import type { GameStore, StoredPlayer, GameOptions } from './gameStore'; 
 import { 
   serializeGameState, 
-  // deserializeGameState, // Not used on server-side directly for updates
+  deserializeGameState, 
   createDeltaUpdate 
 } from './serialization';
 import { 
   placePawn, 
   movePawn, 
-} from './gameLogic';
-import type { GameState, PlayerId } from './types';
-// import LZString from 'lz-string'; // LZString removed for game state transport
+  GameState,
+  PlayerId
+} from './gameLogic'; // Assuming GameState and PlayerId are correctly exported
+import LZString from 'lz-string';
 
-const RATE_LIMIT = {
+const RATE_LIMIT_CONFIG = {
   maxRequests: 20, 
-  timeWindow: 1000 
+  timeWindowMs: 1000 
 };
 
-const MOVE_TIMING = {
-  minTimeBetweenMoves: 200, 
-  maxTimeVariance: 3000 
+const MOVE_TIMING_CONFIG = {
+  minTimeBetweenMovesMs: 200, 
+  maxClientServerTimeDriftMs: 3000 
 };
 
-interface RateLimitInfo {
+interface ClientRateLimitInfo {
   count: number;
-  lastReset: number;
+  lastResetTime: number;
 }
 
-export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, redis: Redis */) { // Redis removed
-  const rateLimits = new Map<string, RateLimitInfo>();
-  const previousStates = new Map<string, GameState>(); 
+export function setupGameSockets(io: SocketIOServer, gameStore: GameStore, redis: Redis | null) {
+  const clientRateLimits = new Map<string, ClientRateLimitInfo>();
+  const gamePreviousStates = new Map<string, GameState>(); 
 
   io.use((socket, next) => {
     try {
       const clientIp = (socket.handshake.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || socket.handshake.address;
-      const now = Date.now();
+      const currentTime = Date.now();
       
-      let limitInfo = rateLimits.get(clientIp);
-      if (!limitInfo || (now - limitInfo.lastReset > RATE_LIMIT.timeWindow)) {
-        limitInfo = { count: 1, lastReset: now };
-        rateLimits.set(clientIp, limitInfo);
+      let rateLimitInfo = clientRateLimits.get(clientIp);
+      if (!rateLimitInfo || (currentTime - rateLimitInfo.lastResetTime > RATE_LIMIT_CONFIG.timeWindowMs)) {
+        rateLimitInfo = { count: 1, lastResetTime: currentTime };
+        clientRateLimits.set(clientIp, rateLimitInfo);
       } else {
-        limitInfo.count++;
-        if (limitInfo.count > RATE_LIMIT.maxRequests) {
+        rateLimitInfo.count++;
+        if (rateLimitInfo.count > RATE_LIMIT_CONFIG.maxRequests) {
           console.warn(`Rate limit exceeded for IP: ${clientIp}`);
           return next(new Error('Rate limit exceeded. Please try again shortly.'));
         }
@@ -57,7 +58,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, re
   });
 
   io.on('connection', (socket: Socket) => {
-    console.log('New connection:', socket.id);
+    console.log('Socket.IO: New connection:', socket.id);
     let currentJoinedGameId: string | null = null; 
 
     socket.on('ping_time', () => {
@@ -68,7 +69,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, re
       }
     });
 
-    socket.on('create_game', async ({ playerName, options = {} }: {playerName: string, options?: any}) => {
+    socket.on('create_game', async ({ playerName, options = {} }: {playerName: string, options?: GameOptions}) => {
       try {
         if (!playerName || typeof playerName !== 'string' || playerName.trim().length === 0 || playerName.length > 30) {
           socket.emit('game_error', { message: 'Invalid player name.' });
@@ -85,22 +86,21 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, re
 
         socket.join(gameId);
         currentJoinedGameId = gameId;
-        previousStates.set(gameId, game.state);
+        gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(game.state))); // Deep clone for prev state
         
         const binaryState = serializeGameState(game.state);
-        // const compressedState = LZString.compressToUint8Array(binaryState); // Removed: TS error, binaryState is already Uint8Array
+        const compressedState = LZString.compressToUint8Array(binaryState);
         
         socket.emit('game_created', { 
           gameId, 
           playerId: 1 as PlayerId, 
-          gameState: binaryState, // Send Uint8Array directly
+          gameState: compressedState,
           players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
           timestamp: Date.now()
         });
-        
-        console.log(`Game created: ${gameId} by ${playerName} (Socket: ${socket.id})`);
+        console.log(`Socket.IO: Game created: ${gameId} by ${playerName} (Socket: ${socket.id})`);
       } catch (error: any) {
-        console.error('Error creating game:', error);
+        console.error('Socket.IO: Error creating game:', error);
         socket.emit('game_error', { message: `Failed to create game: ${error.message || 'Unknown error'}` });
       }
     });
@@ -118,23 +118,23 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, re
           return;
         }
         
-        const existingPlayer = game.players.find((p: StoredPlayer) => p.id === socket.id);
+        const existingPlayer = game.players.find(p => p.id === socket.id);
         if (existingPlayer) {
             socket.join(gameId);
             currentJoinedGameId = gameId;
-            if (!previousStates.has(gameId)) previousStates.set(gameId, game.state);
+            if (!gamePreviousStates.has(gameId)) gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(game.state)));
 
             const binaryState = serializeGameState(game.state);
-            // const compressedState = LZString.compressToUint8Array(binaryState); // Removed
+            const compressedState = LZString.compressToUint8Array(binaryState);
             socket.emit('game_joined', { 
               gameId, 
               playerId: existingPlayer.playerId, 
-              gameState: binaryState, // Send Uint8Array
+              gameState: compressedState,
               players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
-              opponentName: game.players.find((p:StoredPlayer) => p.id !== socket.id)?.name || null,
+              opponentName: game.players.find(p => p.id !== socket.id)?.name || null,
               timestamp: Date.now()
             });
-            console.log(`${existingPlayer.name} re-joined game: ${gameId}`);
+            console.log(`Socket.IO: ${existingPlayer.name} re-joined game: ${gameId}`);
             return;
         }
 
@@ -157,38 +157,49 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, re
              socket.emit('game_error', { message: 'Failed to retrieve game after join.' });
              return;
         }
-        previousStates.set(gameId, updatedGame.state);
+        gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(updatedGame.state)));
         
         const binaryState = serializeGameState(updatedGame.state);
-        // const compressedState = LZString.compressToUint8Array(binaryState); // Removed
+        const compressedState = LZString.compressToUint8Array(binaryState);
         
         socket.emit('game_joined', { 
           gameId, 
           playerId: result.assignedPlayerId, 
-          gameState: binaryState, // Send Uint8Array
+          gameState: compressedState,
           players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
-          opponentName: updatedGame.players.find((p:StoredPlayer) => p.id !== socket.id)?.name || null,
+          opponentName: updatedGame.players.find(p => p.id !== socket.id)?.name || null,
           timestamp: Date.now()
         });
         
-        io.to(gameId).emit('opponent_joined', { 
+        // Use Redis to publish if available, otherwise direct emit for single instance
+        const opponentJoinedPayload = { 
             opponentName: playerName, 
             players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
             timestamp: Date.now()
-        });
+        };
+        if (redis && redis.status === 'ready') {
+            redis.publish('game-events', JSON.stringify({ type: 'opponent_joined', gameId, data: opponentJoinedPayload }));
+        } else {
+            socket.to(gameId).emit('opponent_joined', opponentJoinedPayload);
+        }
         
         if (updatedGame.players.length === 2) {
-            io.to(gameId).emit('game_start', { 
-                gameState: binaryState, // Send Uint8Array
+            const gameStartPayload = { 
+                gameState: compressedState,
                 players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})),
                 timestamp: Date.now() 
-            });
-            console.log(`Game started: ${gameId}`);
+            };
+            if (redis && redis.status === 'ready') {
+                redis.publish('game-events', JSON.stringify({ type: 'game_start', gameId, data: gameStartPayload }));
+            } else {
+                io.to(gameId).emit('game_start', gameStartPayload);
+            }
+            console.log(`Socket.IO: Game started: ${gameId}`);
         }
-        console.log(`Player ${playerName} (Player ${result.assignedPlayerId}) joined game: ${gameId}`);
+        console.log(`Socket.IO: Player ${playerName} (Player ${result.assignedPlayerId}) joined game: ${gameId}`);
 
       } catch (error: any) {
-        console.error('Error joining game:', error);
+        console.error('Socket.IO: Error joining game:', error);
         socket.emit('game_error', { message: `Failed to join game: ${error.message || 'Unknown error'}` });
       }
     });
@@ -200,7 +211,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, re
       ) => {
         try {
           const serverTime = Date.now();
-          if (Math.abs(serverTime - actionData.clientTimestamp) > MOVE_TIMING.maxTimeVariance) {
+          if (Math.abs(serverTime - actionData.clientTimestamp) > MOVE_TIMING_CONFIG.maxClientServerTimeDriftMs) {
             socket.emit('game_error', { message: 'Time synchronization error. Please check your system clock.' });
             return;
           }
@@ -214,13 +225,13 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, re
             socket.emit('game_error', { message: 'Game not found.' }); return;
           }
 
-          const player = game.players.find((p: StoredPlayer) => p.id === socket.id);
+          const player = game.players.find(p => p.id === socket.id);
           if (!player || player.playerId !== game.state.currentPlayerId) {
             socket.emit('game_error', { message: 'Not your turn or not in game.' }); return;
           }
           
           let newState: GameState | null = null;
-          const currentGameState = game.state; // Use the retrieved game state
+          const currentGameState = game.state;
 
           if (actionType === 'place_pawn' && typeof actionData.squareIndex === 'number') {
             newState = placePawn(currentGameState, actionData.squareIndex);
@@ -237,84 +248,96 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore /*, re
             socket.emit('game_error', { message: 'Failed to update game state on server.' }); return;
           }
           
-          const prevState = previousStates.get(gameId);
-          const deltaUpdates = prevState ? createDeltaUpdate(prevState, newState) : [];
-          previousStates.set(gameId, newState);
+          const prevState = gamePreviousStates.get(gameId) || currentGameState; // Fallback to current if prev not found
+          const deltaUpdates = createDeltaUpdate(prevState, newState);
+          gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(newState))); // Deep clone for next prev state
           
-          const currentFullGame = await gameStore.getGame(gameId); 
-          if (!currentFullGame) { 
-             socket.emit('game_error', { message: 'Internal server error retrieving updated game.' }); return;
-          }
-          const shouldSendFullState = !currentFullGame || currentFullGame.sequenceId % 10 === 0 || deltaUpdates.length === 0 || deltaUpdates.length > 10; // Increased delta threshold
+          const updatedGame = await gameStore.getGame(gameId); // Get the game with updated sequenceId
+          if (!updatedGame) { socket.emit('game_error', { message: 'Internal server error retrieving updated game.' }); return;}
+
+          const shouldSendFullState = updatedGame.sequenceId % 10 === 0 || deltaUpdates.length === 0 || deltaUpdates.length > 10; 
 
           const binaryStateToSend = serializeGameState(newState);
-          // const compressedStateToSend = LZString.compressToUint8Array(binaryStateToSend); // Removed
+          const compressedStateToSend = LZString.compressToUint8Array(binaryState);
+          
+          const eventData = { 
+            gameState: compressedStateToSend,
+            timestamp: Date.now(),
+            fullUpdate: true 
+          };
+          const deltaEventData = {
+            updates: deltaUpdates,
+            seqId: updatedGame.sequenceId, 
+            timestamp: Date.now()
+          };
 
           if (shouldSendFullState) {
-            io.to(gameId).emit('game_updated', { 
-              gameState: binaryStateToSend, // Send Uint8Array
-              timestamp: Date.now(),
-              fullUpdate: true 
-            });
+            if (redis && redis.status === 'ready') redis.publish('game-events', JSON.stringify({ type: 'game_updated', gameId, data: eventData }));
+            else io.to(gameId).emit('game_updated', eventData);
           } else {
-            io.to(gameId).emit('game_delta', { 
-              updates: deltaUpdates,
-              seqId: currentFullGame.sequenceId, 
-              timestamp: Date.now()
-            });
+            if (redis && redis.status === 'ready') redis.publish('game-events', JSON.stringify({ type: 'game_delta', gameId, data: deltaEventData }));
+            else io.to(gameId).emit('game_delta', deltaEventData);
           }
         } catch (error: any) {
-          console.error(`Error handling ${actionType}:`, error);
+          console.error(`Socket.IO: Error handling ${actionType}:`, error);
           socket.emit('game_error', { message: `Failed to process ${actionType}: ${error.message || 'Unknown error'}` });
         }
     };
 
     socket.on('place_pawn', (data) => handlePlayerAction('place_pawn', data.gameId, data));
-    socket.on('move_pawn', (data) to handlePlayerAction('move_pawn', data.gameId, data));
+    socket.on('move_pawn', (data) => handlePlayerAction('move_pawn', data.gameId, data));
 
     socket.on('request_full_state', async ({ gameId }: { gameId: string}) => {
       try {
         const game = await gameStore.getGame(gameId);
         if (game) {
             const binaryState = serializeGameState(game.state);
-            // const compressedState = LZString.compressToUint8Array(binaryState); // Removed
-            socket.emit('game_updated', { 
-                gameState: binaryState, // Send Uint8Array
+            const compressedState = LZString.compressToUint8Array(binaryState);
+            const fullStateData = { 
+                gameState: compressedState,
                 timestamp: Date.now(),
                 fullUpdate: true
-            });
+            };
+            // Full state directly to requester, not via pub/sub to avoid broadcast
+            socket.emit('game_updated', fullStateData);
         } else {
             socket.emit('game_error', { message: `Full state requested for non-existent game: ${gameId}` });
         }
       } catch (error: any) {
-        console.error('Error sending full state:', error);
+        console.error('Socket.IO: Error sending full state:', error);
         socket.emit('game_error', { message: `Failed to send full game state: ${error.message || 'Unknown error'}`});
       }
     });
 
     socket.on('disconnect', async (reason) => {
-      console.log(`Player disconnected: ${socket.id}, Reason: ${reason}`);
+      console.log(`Socket.IO: Player disconnected: ${socket.id}, Reason: ${reason}`);
       if (currentJoinedGameId) {
         try {
           const removedPlayer = await gameStore.removePlayerFromGame(currentJoinedGameId, socket.id);
           if (removedPlayer) {
             const game = await gameStore.getGame(currentJoinedGameId); 
-            const remainingPlayers = game ? game.players.map((p: StoredPlayer) => ({id: p.id, name: p.name, playerId: p.playerId})) : [];
+            const remainingPlayers = game ? game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId})) : [];
             
-            io.to(currentJoinedGameId).emit('opponent_disconnected', {
+            const opponentDisconnectedPayload = {
               playerName: removedPlayer.name,
               playerId: removedPlayer.playerId,
               remainingPlayers,
               timestamp: Date.now()
-            });
-            console.log(`Player ${removedPlayer.name} (Socket: ${socket.id}) left game ${currentJoinedGameId}`);
+            };
+
+            if (redis && redis.status === 'ready') {
+                redis.publish('game-events', JSON.stringify({type: 'opponent_disconnected', gameId: currentJoinedGameId, data: opponentDisconnectedPayload}));
+            } else {
+                 io.to(currentJoinedGameId).emit('opponent_disconnected', opponentDisconnectedPayload);
+            }
+            console.log(`Socket.IO: Player ${removedPlayer.name} (Socket: ${socket.id}) left game ${currentJoinedGameId}`);
             
             if (!game || game.players.length === 0) {
-                 previousStates.delete(currentJoinedGameId);
+                 gamePreviousStates.delete(currentJoinedGameId);
             }
           }
         } catch (error: any) {
-          console.error('Error handling disconnection:', error);
+          console.error('Socket.IO: Error handling disconnection:', error);
         }
         currentJoinedGameId = null; 
       }

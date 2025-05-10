@@ -3,60 +3,73 @@ import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
-// import Redis from 'ioredis'; // Redis removed
-// import { flatbuffers } from 'flatbuffers'; // Not used directly in this file
+import Redis from 'ioredis';
+// import { flatbuffers } from 'flatbuffers'; // Not used directly
 // import { GameStateBuffer } from './src/lib/generated/game-state'; // Not used directly
 import { setupGameSockets } from './src/lib/socketHandler';
-// import { setupMatchmaking } from './src/lib/matchmaking'; // Matchmaking system removed
+import { setupMatchmaking } from './src/lib/matchmaking';
 import { GameStore } from './src/lib/gameStore';
-
-// const redisConnectionString = process.env.REDIS_URL || 'redis://localhost:6379'; // Redis removed
-
-// Create Redis client for GameStore // Redis removed
-/*
-const redisClientOptions = {
-  retryStrategy: (times: number) => { // Added type for 'times'
-    const delay = Math.min(times * 50, 2000); // Max 2s delay
-    console.warn(`Redis: Retrying connection (attempt ${times}), delay ${delay}ms`);
-    return delay;
-  },
-  maxRetriesPerRequest: 3,
-};
-*/
-
-// const redis = new Redis(redisConnectionString, redisClientOptions); // Redis removed
-// const redisSub = new Redis(redisConnectionString, redisClientOptions); // Redis removed
-
-/* Redis event listeners removed
-redis.on('connect', () => {
-  console.log('Redis: Connected to server.');
-});
-redis.on('ready', () => {
-  console.log('Redis: Client is ready.');
-});
-redis.on('error', (err) => {
-  console.error('Redis: Connection error:', err.message);
-});
-redis.on('close', () => {
-  console.log('Redis: Connection closed.');
-});
-redis.on('reconnecting', () => {
-  console.log('Redis: Reconnecting...');
-});
-redis.on('end', () => {
-  console.log('Redis: Connection ended. This usually means all retry attempts failed.');
-});
-*/
-
-// Initialize game store with an in-memory solution
-const gameStore = new GameStore(); // Changed from new GameStore(redis)
+import { createAdapter } from '@socket.io/redis-adapter';
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 const port = parseInt(process.env.PORT || "3000", 10);
 
-app.prepare().then(() => {
+const redisConnectionString = process.env.REDIS_URL || 'redis://localhost:6379';
+let redis: Redis | null = null;
+let pubClient: Redis | null = null;
+let subClient: Redis | null = null;
+let gameStore: GameStore;
+
+async function initializeRedis() {
+  try {
+    const client = new Redis(redisConnectionString, {
+      maxRetriesPerRequest: 3,
+      retryStrategy: (times: number) => {
+        const delay = Math.min(times * 100, 2000); // Exponential backoff
+        console.warn(`Redis: Retrying connection (attempt ${times}), delay ${delay}ms`);
+        return delay;
+      },
+      enableOfflineQueue: false, // Don't queue commands if not connected
+    });
+
+    await client.ping(); // Check connection
+    console.log('Redis: Connected to server successfully.');
+    redis = client; // Main client for GameStore
+    
+    // For Socket.IO adapter and pub/sub, duplicate connections are recommended
+    pubClient = redis.duplicate();
+    subClient = redis.duplicate();
+
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    console.log('Redis: Pub/Sub clients connected.');
+    
+    return true;
+  } catch (err: any) {
+    console.error('Redis: Failed to connect to Redis. Features requiring Redis (like remote multiplayer persistence and matchmaking) will be degraded or unavailable.', err.message);
+    if (redis) {
+      redis.disconnect();
+      redis = null;
+    }
+    if (pubClient) {
+        pubClient.disconnect();
+        pubClient = null;
+    }
+    if (subClient) {
+        subClient.disconnect();
+        subClient = null;
+    }
+    return false;
+  }
+}
+
+app.prepare().then(async () => {
+  const redisAvailable = await initializeRedis();
+
+  // Initialize game store with Redis if available, otherwise in-memory
+  gameStore = new GameStore(redis); // gameStore will handle redis being null
+
   const server = createServer((req, res) => {
     try {
       const parsedUrl = parse(req.url!, true);
@@ -70,7 +83,7 @@ app.prepare().then(() => {
 
   const io = new SocketIOServer(server, {
     cors: {
-      origin: process.env.NEXT_PUBLIC_BASE_URL || "*", 
+      origin: process.env.NEXT_PUBLIC_BASE_URL ? process.env.NEXT_PUBLIC_BASE_URL.split(',') : "*",
       methods: ["GET", "POST"]
     },
     perMessageDeflate: {
@@ -85,25 +98,51 @@ app.prepare().then(() => {
     pingTimeout: 5000
   });
   
-  // No Redis pub/sub needed for in-memory store
+  if (redisAvailable && pubClient && subClient) {
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log('Socket.IO: Redis adapter configured.');
 
-  // Matchmaking system removed
-  // setupMatchmaking(gameStore, redis); 
+    subClient.subscribe('game-events', (err) => {
+      if (err) {
+        console.error('Redis: Failed to subscribe to game-events', err);
+      } else {
+        console.log('Redis: Subscribed to game-events channel.');
+      }
+    });
 
-  // Setup game socket handlers
-  setupGameSockets(io, gameStore); // Removed redis argument
+    subClient.on('message', (channel, message) => {
+      if (channel === 'game-events') {
+        try {
+          const event = JSON.parse(message);
+          if (event.gameId && event.type && event.data) { // Ensure data exists
+            io.to(event.gameId).emit(event.type, event.data);
+          }
+        } catch (e) {
+          console.error('Redis: Error parsing game-event message:', e);
+        }
+      }
+    });
+  } else {
+    console.warn('Socket.IO: Running without Redis adapter. Scalability will be limited to a single instance.');
+    console.warn('Redis: Pub/Sub for game-events is disabled.');
+  }
+  
+  setupMatchmaking(gameStore, redis); // Pass potentially null redis
+  setupGameSockets(io, gameStore, redis); // Pass potentially null redis
 
-  server.listen(port, (err?: any) => {
+  server.listen(port, (err?: any) => { // Added type for err
     if (err) {
         console.error("Failed to start server:", err);
-        // process.exit(1); // Exit if server fails to start
-        throw err; // Re-throw for Next.js to handle if it can
+        throw err;
     }
     console.log(`> Ready on http://localhost:${port}`);
     console.log(`> Socket.IO server initialized. CORS origin: ${process.env.NEXT_PUBLIC_BASE_URL || "*"}`);
+    if (!redisAvailable) {
+      console.warn("> WARNING: Redis is not connected. Multiplayer features will be limited and game data will not persist across server restarts.");
+    }
   });
 
-  server.on('error', (err: NodeJS.ErrnoException) => {
+  server.on('error', (err: NodeJS.ErrnoException) => { // Explicitly type err
     console.error('Server error:', err);
     if (err.code === 'EADDRINUSE') {
       console.error(`Port ${port} is already in use. Please use a different port.`);
@@ -116,16 +155,14 @@ app.prepare().then(() => {
   process.exit(1);
 });
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  // redis.quit(); // Redis removed
-  // if (redisSub) redisSub.quit(); // Redis removed
+const gracefulShutdown = () => {
+  console.log('Initiating graceful shutdown...');
+  if (redis) redis.disconnect();
+  if (pubClient) pubClient.disconnect();
+  if (subClient) subClient.disconnect();
+  // Add any other cleanup tasks here
   process.exit(0);
-});
+};
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  // redis.quit(); // Redis removed
-  // if (redisSub) redisSub.quit(); // Redis removed
-  process.exit(0);
-});
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);

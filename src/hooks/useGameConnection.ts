@@ -4,11 +4,10 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { GameState, PlayerId } from '@/lib/types'; 
 import { create } from 'zustand';
-// import LZString from 'lz-string'; // LZString removed for game state transport
+import LZString from 'lz-string';
 import { deserializeGameState } from '@/lib/serialization'; 
 import { applyDeltaUpdatesToGameState } from '@/lib/clientUtils'; 
-import { updateBlockingStatus, updateDeadZones, checkWinCondition, assignPlayerColors, createInitialGameState } from '@/lib/gameLogic';
-
+import { assignPlayerColors, PAWNS_PER_PLAYER } from '@/lib/gameLogic';
 
 export interface PlayerInfo {
   id: string; 
@@ -37,6 +36,7 @@ export interface GameStoreState {
   setIsConnected: (connected: boolean) => void;
   setIsConnecting: (connecting: boolean) => void; 
   setIsWaitingForOpponent: (waiting: boolean) => void;
+  setPingLatency: (latency: number) => void;
   clearStore: () => void; 
   resetForNewGame: () => void; 
 }
@@ -55,21 +55,18 @@ const useGameStore = create<GameStoreState>((set, get) => ({
   players: [],
   setGameState: (gameState) => {
     if (gameState) {
-      const { blockedPawns, blockingPawns } = updateBlockingStatus(gameState.board);
-      const { deadZones, deadZoneCreatorPawns } = updateDeadZones(gameState.board, gameState.playerColors);
-      const winCheck = checkWinCondition(gameState); 
-
-      set({ 
-        gameState: {
-          ...gameState,
-          blockedPawnsInfo: blockedPawns,
-          blockingPawnsInfo: blockingPawns,
-          deadZoneSquares: deadZones,
-          deadZoneCreatorPawnsInfo: deadZoneCreatorPawns,
-          winner: winCheck.winner,
-          winningLine: winCheck.winningLine,
-        }
-      });
+      // Ensure Sets and Maps are correctly initialized if they come from plain objects
+      const hydratedState: GameState = {
+        ...gameState,
+        playerColors: gameState.playerColors || assignPlayerColors(), // Ensure playerColors exists
+        blockedPawnsInfo: new Set(Array.from(gameState.blockedPawnsInfo || [])),
+        blockingPawnsInfo: new Set(Array.from(gameState.blockingPawnsInfo || [])),
+        deadZoneSquares: new Map((Array.isArray(gameState.deadZoneSquares) ? gameState.deadZoneSquares : Object.entries(gameState.deadZoneSquares || {})).map(([k,v]:[string, PlayerId]) => [parseInt(k),v])),
+        deadZoneCreatorPawnsInfo: new Set(Array.from(gameState.deadZoneCreatorPawnsInfo || [])),
+        pawnsToPlace: gameState.pawnsToPlace || {1: PAWNS_PER_PLAYER, 2: PAWNS_PER_PLAYER},
+        placedPawns: gameState.placedPawns || {1:0, 2:0}
+      };
+      set({ gameState: hydratedState });
     } else {
       set({ gameState: null });
     }
@@ -81,18 +78,8 @@ const useGameStore = create<GameStoreState>((set, get) => ({
     
     const newState = applyDeltaUpdatesToGameState(currentState, updates); 
     
-    const { blockedPawns, blockingPawns } = updateBlockingStatus(newState.board);
-    const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newState.board, newState.playerColors);
-    const winCheck = checkWinCondition(newState);
-
     set({ gameState: {
-        ...newState,
-        blockedPawnsInfo: blockedPawns,
-        blockingPawnsInfo: blockingPawns,
-        deadZoneSquares: deadZones,
-        deadZoneCreatorPawnsInfo: deadZoneCreatorPawns,
-        winner: winCheck.winner,
-        winningLine: winCheck.winningLine,
+        ...newState, // applyDeltaUpdatesToGameState should return a fully hydrated state
       } 
     });
   },
@@ -103,6 +90,7 @@ const useGameStore = create<GameStoreState>((set, get) => ({
   setIsConnected: (connected) => set({ isConnected: connected, isConnecting: false }), 
   setIsConnecting: (connecting) => set({ isConnecting: connecting }),
   setIsWaitingForOpponent: (waiting) => set({ isWaitingForOpponent: waiting }),
+  setPingLatency: (latency) => set({ pingLatency: latency }),
   clearStore: () => set({
     gameState: null, localPlayerId: null, opponentName: null, gameId: null, error: null,
     isConnected: get().isConnected, 
@@ -139,7 +127,9 @@ export function useGameConnection() {
     store.setIsConnecting(true);
     store.setError(null); 
 
-    const socketUrl = typeof window !== 'undefined' ? window.location.origin : (process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000');
+    const socketUrl = typeof window !== 'undefined' ? 
+                      (process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin) : 
+                      (process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000');
     
     const newSocket = io(socketUrl, {
       transports: ['websocket'],
@@ -152,23 +142,26 @@ export function useGameConnection() {
 
     return new Promise<Socket>((resolve, reject) => {
         newSocket.on('connect', () => {
-            console.log('Connected to game server with ID:', newSocket.id);
+            console.log('Socket.IO: Connected to game server with ID:', newSocket.id);
             store.setIsConnected(true);
             syncTime();
             resolve(newSocket);
         });
         
         newSocket.on('disconnect', (reason) => {
-            console.log('Disconnected from game server:', reason);
+            console.log('Socket.IO: Disconnected from game server:', reason);
             store.setIsConnected(false);
             if (reason !== 'io client disconnect' && reason !== 'io server disconnect') { 
-                store.setError(`Disconnected: ${reason}. Please try again.`);
+                store.setError(`Disconnected: ${reason}. Please check your connection or try again.`);
             }
         });
         
         newSocket.on('connect_error', (err) => {
-            console.error('Connection error:', err.message, err.name);
-            store.setError(`Connection failed: ${err.message}. Server might be unavailable.`);
+            console.error('Socket.IO: Connection error:', err.message, err.name);
+            const errorMessage = err.message.includes('xhr poll error') || err.message.includes('websocket error') 
+                ? 'Failed to connect to the game server. The server might be unavailable or a network issue occurred.'
+                : `Connection failed: ${err.message}. Please try again.`;
+            store.setError(errorMessage);
             store.setIsConnected(false); 
             store.setIsConnecting(false);
             reject(err);
@@ -177,9 +170,15 @@ export function useGameConnection() {
   }, [store, syncTime]);
   
   useEffect(() => {
+    connectSocket().catch(err => {
+        console.warn("Socket.IO: Initial connection attempt failed in useEffect.", err.message);
+        // Error is already set by connectSocket
+    });
+
     const currentSocket = socketRef.current;
-    if (!currentSocket) return;
+    if (!currentSocket) return; // Should be set by connectSocket or remain null
     
+    // Clear existing listeners before adding new ones to prevent duplicates
     currentSocket.off('pong_time');
     currentSocket.off('game_created');
     currentSocket.off('game_joined');
@@ -189,39 +188,48 @@ export function useGameConnection() {
     currentSocket.off('game_delta');
     currentSocket.off('opponent_disconnected');
     currentSocket.off('game_error');
+    currentSocket.off('matchmaking_joined');
+    currentSocket.off('matchmaking_left');
+    currentSocket.off('match_found');
+
 
     currentSocket.on('pong_time', (serverTime: number) => {
       if (lastPingSent.current) {
         const now = Date.now();
         const roundTripTime = now - lastPingSent.current;
-        useGameStore.setState({ pingLatency: roundTripTime });
+        store.setPingLatency(roundTripTime);
         serverTimeOffset.current = serverTime - (now - roundTripTime / 2);
-        setTimeout(syncTime, 30000);
+        setTimeout(syncTime, 30000); // Ping every 30s
       }
     });
     
-    const handleGameCreated = ({ gameId, playerId, gameState, players, timestamp }: { gameId: string; playerId: PlayerId; gameState: ArrayBuffer; players: PlayerInfo[], timestamp: number }) => {
+    const handleCompressedState = (compressedState: Uint8Array, origin: string): GameState | null => {
       try {
-        // const decompressedState = LZString.decompressFromUint8Array(new Uint8Array(gameState)); // Removed
-        // if (!decompressedState) throw new Error("Failed to decompress game state.");
-        const decodedState = deserializeGameState(new Uint8Array(gameState)); 
+        const binaryState = LZString.decompressFromUint8Array(compressedState);
+        if (!binaryState) throw new Error("Failed to decompress game state.");
+        return deserializeGameState(binaryState);
+      } catch (error: any) {
+        console.error(`Error processing compressed game state from ${origin}:`, error);
+        store.setError(`Failed to process game data from ${origin}: ${error.message}`);
+        return null;
+      }
+    };
+    
+    currentSocket.on('game_created', ({ gameId, playerId, gameState: compressedGameState, players, timestamp }: { gameId: string; playerId: PlayerId; gameState: Uint8Array; players: PlayerInfo[], timestamp: number }) => {
+      const decodedState = handleCompressedState(compressedGameState, 'game_created');
+      if (decodedState) {
         store.setGameId(gameId);
         store.setLocalPlayerId(playerId);
         store.setGameState(decodedState);
         store.setPlayers(players);
         store.setIsWaitingForOpponent(players.length < 2);
         store.setError(null);
-      } catch (error: any) {
-        console.error('Error processing game_created:', error);
-        store.setError(`Failed to process game data (created): ${error.message}`);
       }
-    };
+    });
 
-    const handleGameJoined = ({ gameId, playerId, gameState, players, opponentName, timestamp }: { gameId: string; playerId: PlayerId; gameState: ArrayBuffer; players: PlayerInfo[], opponentName: string | null, timestamp: number }) => {
-       try {
-        // const decompressedState = LZString.decompressFromUint8Array(new Uint8Array(gameState)); // Removed
-        // if (!decompressedState) throw new Error("Failed to decompress game state.");
-        const decodedState = deserializeGameState(new Uint8Array(gameState));
+    currentSocket.on('game_joined', ({ gameId, playerId, gameState: compressedGameState, players, opponentName, timestamp }: { gameId: string; playerId: PlayerId; gameState: Uint8Array; players: PlayerInfo[], opponentName: string | null, timestamp: number }) => {
+       const decodedState = handleCompressedState(compressedGameState, 'game_joined');
+       if (decodedState) {
         store.setGameId(gameId);
         store.setLocalPlayerId(playerId);
         store.setGameState(decodedState);
@@ -229,101 +237,102 @@ export function useGameConnection() {
         store.setOpponentName(opponentName);
         store.setIsWaitingForOpponent(players.length < 2 && !opponentName);
         store.setError(null);
-      } catch (error: any) {
-        console.error('Error processing game_joined:', error);
-        store.setError(`Failed to process game data (joined): ${error.message}`);
       }
-    };
+    });
 
-    const handleOpponentJoined = ({ opponentName, players, timestamp }: { opponentName: string; players: PlayerInfo[], timestamp: number}) => {
+    currentSocket.on('opponent_joined', ({ opponentName, players, timestamp }: { opponentName: string; players: PlayerInfo[], timestamp: number}) => {
         store.setOpponentName(opponentName);
         store.setPlayers(players);
         store.setIsWaitingForOpponent(false);
         store.setError(null);
-    };
+    });
     
-    const handleGameStart = ({ gameState, players, timestamp }: { gameState: ArrayBuffer; players: PlayerInfo[], timestamp: number }) => {
-        try {
-            // const decompressedState = LZString.decompressFromUint8Array(new Uint8Array(gameState)); // Removed
-            // if (!decompressedState) throw new Error("Failed to decompress game state.");
-            const decodedState = deserializeGameState(new Uint8Array(gameState));
+    currentSocket.on('game_start', ({ gameState: compressedGameState, players, timestamp }: { gameState: Uint8Array; players: PlayerInfo[], timestamp: number }) => {
+        const decodedState = handleCompressedState(compressedGameState, 'game_start');
+        if (decodedState) {
             store.setGameState(decodedState);
             store.setPlayers(players);
             store.setIsWaitingForOpponent(false);
             store.setError(null);
-        } catch (error: any) {
-            console.error('Error processing game_start:', error);
-            store.setError(`Failed to start game: ${error.message}`);
         }
-    };
+    });
     
-    const handleGameUpdated = ({ gameState, timestamp, fullUpdate }: { gameState: ArrayBuffer; timestamp: number; fullUpdate?: boolean}) => {
-        try {
-            // const decompressedState = LZString.decompressFromUint8Array(new Uint8Array(gameState)); // Removed
-            // if (!decompressedState) throw new Error("Failed to decompress game state.");
-            const decodedState = deserializeGameState(new Uint8Array(gameState));
+    currentSocket.on('game_updated', ({ gameState: compressedGameState, timestamp, fullUpdate }: { gameState: Uint8Array; timestamp: number; fullUpdate?: boolean}) => {
+        const decodedState = handleCompressedState(compressedGameState, 'game_updated (full)');
+        if (decodedState) {
             store.setGameState(decodedState);
             store.setError(null);
-        } catch (error: any) {
-            console.error('Error processing game_updated:', error);
-            store.setError(`Failed to update game: ${error.message}`);
         }
-    };
+    });
 
-    const handleGameDelta = ({ updates, seqId, timestamp }: { updates: any[]; seqId: number; timestamp: number }) => {
+    currentSocket.on('game_delta', ({ updates, seqId, timestamp }: { updates: any[]; seqId: number; timestamp: number }) => {
         try {
             store.applyDeltaUpdates(updates, seqId);
             store.setError(null);
         } catch (error: any) {
             console.error('Error processing game_delta:', error);
-            store.setError(`Failed to apply update: ${error.message}`);
+            store.setError(`Failed to apply update: ${error.message}. Requesting full state.`);
             if (socketRef.current && store.gameId) {
               socketRef.current.emit('request_full_state', { gameId: store.gameId });
             }
         }
-    };
+    });
     
-    const handleOpponentDisconnected = ({ playerName, playerId, remainingPlayers, timestamp }: { playerName: string; playerId: PlayerId; remainingPlayers: PlayerInfo[], timestamp: number }) => {
+    currentSocket.on('opponent_disconnected', ({ playerName, playerId: disconnectedPlayerId, remainingPlayers, timestamp }: { playerName: string; playerId: PlayerId; remainingPlayers: PlayerInfo[], timestamp: number }) => {
         store.setError(`${playerName} has disconnected. Waiting for them to rejoin or for a new opponent.`);
         store.setPlayers(remainingPlayers);
-        store.setOpponentName(null); 
+        if(store.localPlayerId !== disconnectedPlayerId) { // Only clear opponent name if it's not me who disconnected (edge case)
+            store.setOpponentName(null); 
+        }
         store.setIsWaitingForOpponent(true); 
-    };
+    });
 
-    const handleGameError = ({ message }: { message: string}) => {
-        console.error("Received game_error from server:", message);
+    currentSocket.on('game_error', ({ message }: { message: string}) => {
+        console.warn("Received game_error from server:", message);
         store.setError(message);
-    };
+    });
 
-    currentSocket.on('game_created', handleGameCreated);
-    currentSocket.on('game_joined', handleGameJoined);
-    currentSocket.on('opponent_joined', handleOpponentJoined);
-    currentSocket.on('game_start', handleGameStart);
-    currentSocket.on('game_updated', handleGameUpdated);
-    currentSocket.on('game_delta', handleGameDelta);
-    currentSocket.on('opponent_disconnected', handleOpponentDisconnected);
-    currentSocket.on('game_error', handleGameError);
+    currentSocket.on('matchmaking_joined', ({ message, position }: { message: string, position?: number }) => {
+      console.log("Matchmaking: Joined queue.", message, position ? `Position: ${position}` : '');
+      store.setError(null); // Clear previous errors
+      // UI should reflect being in queue
+    });
+    currentSocket.on('matchmaking_left', ({ message }: { message: string}) => {
+      console.log("Matchmaking: Left queue.", message);
+      // UI should reflect leaving queue
+    });
+    currentSocket.on('match_found', ({ gameId: newGameId, opponentName, assignedPlayerId }: { gameId: string, opponentName: string, assignedPlayerId: PlayerId }) => {
+      console.log(`Matchmaking: Match found! Game ID: ${newGameId}, Opponent: ${opponentName}, Your PlayerID: ${assignedPlayerId}`);
+      store.setGameId(newGameId);
+      store.setLocalPlayerId(assignedPlayerId);
+      store.setOpponentName(opponentName);
+      store.setIsWaitingForOpponent(false); // Match found, no longer waiting
+      // Client should navigate to /game/[newGameId] or server should send full game state
+      // For now, assume client navigates and then on 'game_joined' receives state
+      if (typeof window !== 'undefined') {
+         window.location.href = `/game/${newGameId}`; // Simplistic navigation
+      }
+    });
     
     return () => {
-      currentSocket.off('game_created', handleGameCreated);
-      currentSocket.off('game_joined', handleGameJoined);
-      currentSocket.off('opponent_joined', handleOpponentJoined);
-      currentSocket.off('game_start', handleGameStart);
-      currentSocket.off('game_updated', handleGameUpdated);
-      currentSocket.off('game_delta', handleGameDelta);
-      currentSocket.off('opponent_disconnected', handleOpponentDisconnected);
-      currentSocket.off('game_error', handleGameError);
+      // No need to call currentSocket.off for all events, disconnect handles it.
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        // socketRef.current = null; // Let useEffect handle this on disconnect event
+        store.setIsConnected(false);
+        store.clearStore(); 
+      }
     };
-  }, [socketRef.current, store, syncTime]); 
+  }, [connectSocket, store, syncTime]); // Added connectSocket to dependencies
   
   const getAdjustedTime = useCallback(() => {
     return Date.now() + serverTimeOffset.current;
   }, []);
   
-  const createGame = useCallback(async (playerName: string, options = {}) => {
+  const createGame = useCallback(async (playerName: string, options: GameOptions = {}) => {
     store.resetForNewGame();
     try {
-      const currentSocket = await connectSocket();
+      const currentSocket = await connectSocket(); // Ensures connection before emitting
       currentSocket.emit('create_game', { playerName, options, clientTimestamp: getAdjustedTime() });
     } catch (err: any) {
       store.setError(`Failed to create game: ${err.message || 'Connection error'}`);
@@ -362,11 +371,33 @@ export function useGameConnection() {
   const disconnect = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.disconnect();
-      socketRef.current = null;
+      // socketRef.current = null; // Let useEffect handle this on disconnect event
       store.setIsConnected(false);
       store.clearStore(); 
     }
   }, [store]);
+
+  const joinMatchmakingQueue = useCallback(async (playerName: string, rating?: number) => {
+    if (!playerName || playerName.trim() === "") {
+        store.setError("Player name is required to join matchmaking.");
+        return;
+    }
+    try {
+        const currentSocket = await connectSocket();
+        currentSocket.emit('join_matchmaking', { playerName, rating, clientTimestamp: getAdjustedTime() });
+    } catch (err: any) {
+        store.setError(`Failed to join matchmaking: ${err.message || 'Connection error'}`);
+    }
+  }, [connectSocket, getAdjustedTime, store]);
+
+  const leaveMatchmakingQueue = useCallback(async () => {
+    try {
+        const currentSocket = await connectSocket(); // Ensure connected
+        currentSocket.emit('leave_matchmaking', { clientTimestamp: getAdjustedTime() });
+    } catch (err: any) {
+        store.setError(`Failed to leave matchmaking: ${err.message || 'Connection error'}`);
+    }
+  }, [connectSocket, getAdjustedTime, store]);
   
   return {
     gameState: store.gameState,
@@ -385,7 +416,9 @@ export function useGameConnection() {
     movePawnAction,
     clearError,
     disconnect, 
-    connect: connectSocket, 
+    connect: connectSocket,
+    joinMatchmakingQueue,
+    leaveMatchmakingQueue,
   };
 }
 
