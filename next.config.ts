@@ -3,12 +3,9 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   experimental: {
-    allowedDevOrigins: [
-      "https://3000-firebase-studio-1746739921276.cluster-hf4yr35cmnbd4vhbxvfvc6cp5q.cloudworkstations.dev",
-      "http://localhost:3000", // For local development
-      // Ensure the specific origin from the error is listed with its protocol.
-      // If the error persists, double-check the exact URL Next.js HMR is trying to connect from.
-    ],
+    // Using "*" to allow all origins for development.
+    // For production, this should be restricted to specific domains.
+    allowedDevOrigins: ["*"],
   },
   typescript: {
     ignoreBuildErrors: true,

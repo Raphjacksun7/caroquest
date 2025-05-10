@@ -2,14 +2,13 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { GameState } from '@/lib/gameLogic'; 
-import type { AIAction } from '@/lib/ai/mcts';
+import type { Action as AIAction } from '@/lib/ai/mcts'; // Ensure AIAction type is correctly imported
 
 const workerCache = new Map<string, Worker>();
 
 function createNewAIWorker(): Worker {
   // Web workers in the 'public' directory are served from the root.
-  // Prepending import.meta.url can cause issues if not handled carefully by the bundler/server.
-  // Direct path from public root is more reliable.
+  // The path should be relative to the public directory root.
   return new Worker('/workers/mcts-worker.js', { type: 'module' });
 }
 
@@ -45,14 +44,14 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
           console.error("AI Worker Error from message:", event.data.error);
           currentMovePromiseRef.current.reject(new Error(event.data.error));
         } else if (event.data.type === 'MOVE_CALCULATED' && event.data.move === undefined) { 
-          currentMovePromiseRef.current.resolve(null);
+          currentMovePromiseRef.current.resolve(null); // AI might not find a move
         } else {
           console.warn('Unexpected message from AI worker:', event.data);
           currentMovePromiseRef.current.reject(new Error('Unexpected message from AI worker'));
         }
         currentMovePromiseRef.current = null;
       }
-      setIsLoading(false);
+      setIsLoading(false); // AI processing finished
     };
 
     const handleError = (err: ErrorEvent) => {
@@ -67,6 +66,10 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     };
 
     if (workerInstance) {
+        // Worker is now created on demand, so it might take a moment to be ready
+        // Setting isLoading to false after a short delay or when worker confirms readiness
+        // For simplicity, assume it's ready quickly for now. A more robust solution
+        // might involve the worker sending a "ready" message.
         setTimeout(() => setIsLoading(false), 50); 
         workerInstance.addEventListener('message', handleMessage);
         workerInstance.addEventListener('error', handleError);
@@ -76,21 +79,18 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     }
     
     return () => {
-      // Worker lifecycle management:
-      // workerInstance?.removeEventListener('message', handleMessage);
-      // workerInstance?.removeEventListener('error', handleError);
-      // If terminating, ensure proper cleanup:
-      // if (workerInstance && workerCache.get(difficulty) === workerInstance) {
-      //   workerInstance.terminate();
-      //   workerCache.delete(difficulty);
-      // }
+      // Only remove event listeners from the specific workerInstance.
+      // Do not terminate workers from the cache here, as they might be reused.
+      workerInstance?.removeEventListener('message', handleMessage);
+      workerInstance?.removeEventListener('error', handleError);
       
+      // If a move calculation was in progress, reject it.
       if (currentMovePromiseRef.current) {
-        currentMovePromiseRef.current.reject(new Error("AI calculation cancelled."));
+        currentMovePromiseRef.current.reject(new Error("AI calculation cancelled due to component unmount or difficulty change."));
         currentMovePromiseRef.current = null;
       }
     };
-  }, [difficulty]);
+  }, [difficulty]); // Re-run effect if difficulty changes to get/create the correct worker
 
   const calculateBestMove = useCallback(async (gameState: GameState): Promise<AIAction | null> => {
     if (!aiWorker) {
@@ -99,15 +99,19 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     }
     
     if (currentMovePromiseRef.current) {
+      // If a calculation is already in progress, it might be better to cancel it
+      // or wait, depending on desired behavior. For now, let's reject the old one.
       currentMovePromiseRef.current.reject(new Error("New AI move calculation started before the previous one finished."));
       currentMovePromiseRef.current = null;
     }
     
+    setIsLoading(true); // Set loading true when calculation starts
     setError(null);
 
     return new Promise((resolve, reject) => {
       currentMovePromiseRef.current = { resolve, reject };
       try {
+        // Pass a deep clone of the game state to the worker
         const stateToSend = structuredClone(gameState);
         aiWorker.postMessage({ gameState: stateToSend, difficulty });
       } catch (e: any) {
@@ -116,9 +120,10 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
         setError(errMessage);
         reject(new Error(errMessage));
         currentMovePromiseRef.current = null;
+        setIsLoading(false); // Reset loading on error
       }
     });
-  }, [aiWorker, difficulty]);
+  }, [aiWorker, difficulty]); // Add difficulty to dependencies
   
   return {
     calculateBestMove,

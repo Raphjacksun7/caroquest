@@ -4,7 +4,6 @@ import { parse } from 'url';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { setupGameSockets } from './src/lib/socketHandler';
-// import { setupMatchmaking } from './src/lib/matchmaking'; // Matchmaking with Redis removed for now
 import { GameStore } from './src/lib/gameStore';
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -13,7 +12,7 @@ const handle = app.getRequestHandler();
 const port = parseInt(process.env.PORT || "3000", 10);
 
 // Initialize in-memory game store
-const gameStore = new GameStore();
+const gameStore = new GameStore(); // Ensure GameStore is instantiated
 
 app.prepare().then(async () => {
   const server = createServer((req, res) => {
@@ -29,7 +28,7 @@ app.prepare().then(async () => {
 
   const io = new SocketIOServer(server, {
     cors: {
-      origin: (process.env.NEXT_PUBLIC_BASE_URL ? process.env.NEXT_PUBLIC_BASE_URL.split(',') : "*"),
+      origin: "*", // Allow all origins for Socket.IO in development
       methods: ["GET", "POST"]
     },
     perMessageDeflate: {
@@ -46,10 +45,7 @@ app.prepare().then(async () => {
   
   console.log('Socket.IO: Using in-memory adapter. Multiplayer features will be limited to a single server instance.');
   
-  // Matchmaking with Redis is removed. If a simple in-memory matchmaking is needed, it would be set up here.
-  // For now, direct game creation/joining will be the focus.
-  // setupMatchmaking(gameStore, io); 
-
+  // Pass the instantiated gameStore to setupGameSockets
   setupGameSockets(io, gameStore);
 
   server.listen(port, (err?: any) => {
@@ -58,7 +54,7 @@ app.prepare().then(async () => {
         throw err;
     }
     console.log(`> Ready on http://localhost:${port}`);
-    console.log(`> Socket.IO server initialized. CORS origin: ${process.env.NEXT_PUBLIC_BASE_URL || "*"}`);
+    console.log(`> Socket.IO server initialized. CORS origin: *`);
   });
 
   server.on('error', (err: NodeJS.ErrnoException) => {
@@ -66,7 +62,6 @@ app.prepare().then(async () => {
     if (err.code === 'EADDRINUSE') {
       console.error(`Port ${port} is already in use. Please use a different port.`);
     }
-    // No process.exit(1) here to allow Next.js to handle its lifecycle in dev
   });
 
 }).catch(ex => {
@@ -76,8 +71,8 @@ app.prepare().then(async () => {
 
 const gracefulShutdown = () => {
   console.log('Initiating graceful shutdown...');
-  if (gameStore) {
-    gameStore.destroy(); // Ensure GameStore has a destroy method for cleanup
+  if (gameStore && typeof gameStore.destroy === 'function') {
+    gameStore.destroy(); 
   }
   process.exit(0);
 };
