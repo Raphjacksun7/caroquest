@@ -4,7 +4,7 @@ import { parse } from 'url';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { setupGameSockets } from './src/lib/socketHandler';
-import { setupMatchmaking } from './src/lib/matchmaking'; // Assuming this will also be in-memory
+import { setupMatchmaking } from './src/lib/matchmaking'; 
 import { GameStore } from './src/lib/gameStore';
 
 // Initialize in-memory game store
@@ -13,6 +13,8 @@ const gameStore = new GameStore();
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
+
+// Ensure PORT environment variable is used, or default to 3000
 const port = parseInt(process.env.PORT || "3000", 10);
 
 app.prepare().then(async () => {
@@ -75,12 +77,14 @@ app.prepare().then(async () => {
 
 const gracefulShutdown = () => {
   console.log('Initiating graceful shutdown...');
-  // gameStore.destroy() might be needed if it held resources like intervals
   if (gameStore && typeof gameStore.destroy === 'function') {
     gameStore.destroy(); 
   }
+  // Ensure other resources are cleaned up if necessary
   process.exit(0);
 };
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
+
+```

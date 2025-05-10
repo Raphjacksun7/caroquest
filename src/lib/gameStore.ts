@@ -10,7 +10,7 @@ interface GameData {
   lastActivity: number;
   options: GameOptions; 
   sequenceId: number; 
-  createdAt: Date; 
+  createdAt: Date;
 }
 
 export class GameStore {
@@ -49,7 +49,7 @@ export class GameStore {
       lastActivity: Date.now(),
       options,
       sequenceId: 0,
-      createdAt: new Date(), // Ensure createdAt is initialized
+      createdAt: new Date(),
     };
     
     this.inMemoryGames.set(gameId, gameData);
@@ -58,12 +58,19 @@ export class GameStore {
   }
   
   private hydrateGameState(state: GameState): GameState {
+    // Ensure all Set and Map fields are properly instantiated
+    // This is important if state comes from JSON.parse or similar serialization
     return {
       ...state,
-      playerColors: state.playerColors || assignPlayerColors(),
+      playerColors: state.playerColors || assignPlayerColors(), // Default if missing
       blockedPawnsInfo: new Set(Array.from(state.blockedPawnsInfo || [])),
       blockingPawnsInfo: new Set(Array.from(state.blockingPawnsInfo || [])),
-      deadZoneSquares: new Map((Array.isArray(state.deadZoneSquares) ? gameState.deadZoneSquares : Object.entries(gameState.deadZoneSquares || {})).map(([k,v]:[string, PlayerId]) => [parseInt(k),v])),
+      deadZoneSquares: new Map(
+        (Array.isArray(state.deadZoneSquares) 
+          ? state.deadZoneSquares 
+          : Object.entries(state.deadZoneSquares || {})
+        ).map(([k, v]: [string | number, PlayerId]) => [Number(k), v]) 
+      ),
       deadZoneCreatorPawnsInfo: new Set(Array.from(state.deadZoneCreatorPawnsInfo || [])),
       pawnsToPlace: state.pawnsToPlace || { 1: PAWNS_PER_PLAYER, 2: PAWNS_PER_PLAYER },
       placedPawns: state.placedPawns || { 1:0, 2:0 }
@@ -74,6 +81,8 @@ export class GameStore {
     const gameData = this.inMemoryGames.get(gameId);
     if (!gameData) return null;
 
+    // Return a deep copy to prevent direct modification of stored state
+    // and ensure Sets/Maps are proper instances
     const deepCopiedGameData = JSON.parse(JSON.stringify(gameData)) as GameData;
     deepCopiedGameData.state = this.hydrateGameState(deepCopiedGameData.state);
     deepCopiedGameData.createdAt = new Date(gameData.createdAt); 
@@ -140,7 +149,7 @@ export class GameStore {
     let count = 0;
     
     const sortedGames = Array.from(this.inMemoryGames.values())
-      .sort((a,b) => b.createdAt.getTime() - a.createdAt.getTime()); // Sort by creation time
+      .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()); 
 
     for (const game of sortedGames) {
       if (game.options?.isPublic && game.players.length < 2) {
@@ -167,3 +176,5 @@ export class GameStore {
     console.log('GameStore (in-memory): Destroyed and cleared all games.');
   }
 }
+
+```
