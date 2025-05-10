@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { GameState } from '@/lib/gameLogic'; 
-import type { Action as AIAction } from '@/lib/ai/mcts'; // Ensure this Action type matches what MCTS worker returns
+import type { Action as AIAction } from '@/lib/ai/mcts';
 
 const workerCache = new Map<string, Worker>();
 
@@ -33,16 +33,15 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
         } else if (event.data.type === 'ERROR' && event.data.error) {
           console.error("AI Worker Error from message:", event.data.error);
           currentMovePromiseRef.current.reject(new Error(event.data.error));
-        } else if (event.data.type === 'MOVE_CALCULATED' && !event.data.move) { // AI returned null move
+        } else if (event.data.type === 'MOVE_CALCULATED' && !event.data.move) {
           currentMovePromiseRef.current.resolve(null);
-        }
-         else {
+        } else {
           console.warn('Unexpected message from AI worker:', event.data);
           currentMovePromiseRef.current.reject(new Error('Unexpected message from AI worker'));
         }
         currentMovePromiseRef.current = null;
       }
-      setIsLoading(false); // Worker has responded
+      setIsLoading(false);
     };
 
     const handleError = (err: ErrorEvent) => {
@@ -57,23 +56,17 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     };
 
     if (workerInstance) {
-        // Ensure worker is ready before setting isLoading to false
-        // A simple way is to post an init message and wait for ack, or just assume it's ready quickly.
-        // For now, we'll set loading false after a short delay or on first message.
-        // To be more robust, worker could post 'READY' message.
-        setTimeout(() => setIsLoading(false), 100); // Optimistic ready
+        setTimeout(() => setIsLoading(false), 100); 
 
         workerInstance.addEventListener('message', handleMessage);
         workerInstance.addEventListener('error', handleError);
     }
     
     return () => {
-      // Don't terminate cached workers here.
       workerInstance?.removeEventListener('message', handleMessage);
       workerInstance?.removeEventListener('error', handleError);
-      // If there's an unresolved promise when the component unmounts or difficulty changes, reject it.
       if (currentMovePromiseRef.current) {
-        currentMovePromiseRef.current.reject(new Error("AI calculation cancelled due to component unmount or difficulty change."));
+        currentMovePromiseRef.current.reject(new Error("AI calculation cancelled."));
         currentMovePromiseRef.current = null;
       }
     };
@@ -84,7 +77,7 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
       const msg = "AI worker not initialized.";
       console.warn(msg); setError(msg); return null;
     }
-    if (isLoading) {
+    if (isLoading && !aiWorker) { // Check aiWorker here specifically
       const msg = "AI worker is still loading/initializing.";
       console.warn(msg); setError(msg); return null;
     }
@@ -97,20 +90,14 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
       currentMovePromiseRef.current = null;
     }
     
-    setIsLoading(true); // Set loading true when calculation starts
-    setError(null); // Clear previous errors
+    setIsLoading(true); 
+    setError(null);
 
     return new Promise((resolve, reject) => {
       currentMovePromiseRef.current = { resolve, reject };
       try {
-        // Ensure the gameState sent to the worker has correctly typed Sets/Maps
-        const stateToSend = {
-          ...gameState,
-          blockedPawnsInfo: Array.from(gameState.blockedPawnsInfo),
-          blockingPawnsInfo: Array.from(gameState.blockingPawnsInfo),
-          deadZoneSquares: Object.fromEntries(gameState.deadZoneSquares),
-          deadZoneCreatorPawnsInfo: Array.from(gameState.deadZoneCreatorPawnsInfo),
-        };
+        // Send a structured clone of the game state
+        const stateToSend = structuredClone(gameState);
         aiWorker.postMessage({ gameState: stateToSend, difficulty });
       } catch (e) {
         const errMessage = e instanceof Error ? e.message : String(e);
@@ -121,7 +108,7 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
         currentMovePromiseRef.current = null;
       }
     });
-  }, [aiWorker, isLoading, difficulty, error]); // error dependency was missing
+  }, [aiWorker, isLoading, difficulty, error ]); 
   
   return {
     calculateBestMove,
@@ -129,4 +116,3 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
     error
   };
 }
-    
