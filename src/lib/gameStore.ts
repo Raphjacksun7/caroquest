@@ -21,18 +21,27 @@ interface GameData {
 }
 
 export interface GameOptions {
-  isPublic?: boolean; // Kept for potential future use, but not actively used for matchmaking
-  gameIdToCreate?: string; // Allow specific game ID creation
+  isPublic?: boolean; 
+  gameIdToCreate?: string; 
 }
 
 
 export class GameStore {
   private redis: Redis;
-  
+  private readonly gameKeyPrefix = 'game:';
+  private readonly publicGamesKey = 'public_games';
+  private readonly playerGameKeyPrefix = 'player_game:'; // For tracking which game a player is in
+  private readonly gameTTL = 3600 * 24; // 24 hours
+
   constructor(redisClient: Redis) {
     this.redis = redisClient;
+    this.redis.on('error', (err) => console.error('GameStore Redis Error:', err));
   }
   
+  private getFullGameKey(gameId: string): string {
+    return `${this.gameKeyPrefix}${gameId}`;
+  }
+
   async createGame(creatorSocketId: string, creatorName: string, options: GameOptions = {}): Promise<string> {
     const gameId = options.gameIdToCreate || uuidv4().substring(0, 8).toUpperCase();
     const initialState = createInitialGameState();
@@ -46,109 +55,124 @@ export class GameStore {
       sequenceId: 0
     };
     
-    const compressedData = LZString.compressToUTF16(JSON.stringify(gameData));
-    await this.redis.set(`game:${gameId}`, compressedData);
-    await this.redis.expire(`game:${gameId}`, 3600 * 24); // 24 hours TTL for active games
-
-    // No public games list for now
-    // if (options.isPublic) {
-    //   await this.redis.zadd('public_games', Date.now(), gameId);
-    // }
-    
-    return gameId;
+    try {
+      const compressedData = LZString.compressToUTF16(JSON.stringify(gameData));
+      await this.redis.set(this.getFullGameKey(gameId), compressedData, 'EX', this.gameTTL);
+      // No public games list for now as per simplified requirements
+      return gameId;
+    } catch (error) {
+      console.error(`Error creating game ${gameId} in Redis:`, error);
+      throw new Error(`Failed to create game in store: ${(error as Error).message}`);
+    }
   }
   
   async getGame(gameId: string): Promise<GameData | null> {
-    const compressedData = await this.redis.get(`game:${gameId}`);
-    if (!compressedData) return null;
-    
     try {
+      const compressedData = await this.redis.get(this.getFullGameKey(gameId));
+      if (!compressedData) return null;
+      
       const gameDataString = LZString.decompressFromUTF16(compressedData);
       if (!gameDataString) {
         console.error('Failed to decompress game data for gameId:', gameId);
+        // Consider deleting corrupted data or logging for investigation
+        // await this.redis.del(this.getFullGameKey(gameId)); 
         return null;
       }
       const gameData = JSON.parse(gameDataString) as GameData;
-      // Ensure sets and maps are correctly rehydrated 
+      
+      // Rehydrate Sets and Maps
       gameData.state.blockedPawnsInfo = new Set(Array.from(gameData.state.blockedPawnsInfo || []));
       gameData.state.blockingPawnsInfo = new Set(Array.from(gameData.state.blockingPawnsInfo || []));
-      // deadZoneSquares can be an array of [key, value] pairs from Object.entries
+      
       const deadZoneEntries = Array.isArray(gameData.state.deadZoneSquares) 
         ? gameData.state.deadZoneSquares 
         : Object.entries(gameData.state.deadZoneSquares || {});
       gameData.state.deadZoneSquares = new Map(deadZoneEntries.map(([k,v]) => [parseInt(k), v as PlayerId]));
+      
       gameData.state.deadZoneCreatorPawnsInfo = new Set(Array.from(gameData.state.deadZoneCreatorPawnsInfo || []));
+      
       return gameData;
     } catch (error) {
-      console.error('Error parsing game data for gameId:', gameId, error);
-      await this.redis.del(`game:${gameId}`); // Delete corrupted data
+      console.error(`Error getting game ${gameId} from Redis:`, error);
+      // It's possible the data is corrupted if parsing fails
       return null;
     }
   }
   
   async updateGameState(gameId: string, state: GameState): Promise<boolean> {
-    const game = await this.getGame(gameId);
-    if (!game) return false;
-    
-    game.state = state;
-    game.lastActivity = Date.now();
-    game.sequenceId++; 
-    
-    const compressedData = LZString.compressToUTF16(JSON.stringify(game));
-    await this.redis.set(`game:${gameId}`, compressedData);
-    await this.redis.expire(`game:${gameId}`, 3600 * 24); // Refresh TTL
-    
-    return true;
+    try {
+      const game = await this.getGame(gameId); // Use getGame to ensure rehydration and consistent data structure
+      if (!game) return false;
+      
+      game.state = state; // The state passed in should already be the complete, correct state
+      game.lastActivity = Date.now();
+      game.sequenceId++; 
+      
+      const compressedData = LZString.compressToUTF16(JSON.stringify(game));
+      await this.redis.set(this.getFullGameKey(gameId), compressedData, 'EX', this.gameTTL); // Refresh TTL
+      return true;
+    } catch (error) {
+      console.error(`Error updating game state for ${gameId} in Redis:`, error);
+      return false; // Indicate failure
+    }
   }
   
   async addPlayerToGame(gameId: string, socketId: string, playerName: string): Promise<{success: boolean, assignedPlayerId?: PlayerId, existingPlayers?: StoredPlayer[]}> {
-    const game = await this.getGame(gameId);
-    if (!game) return { success: false };
-    
-    if (game.players.find(p => p.id === socketId)) { // Player already in game (rejoin)
-      return { success: true, assignedPlayerId: game.players.find(p=>p.id === socketId)!.playerId, existingPlayers: game.players };
-    }
+    try {
+      const game = await this.getGame(gameId);
+      if (!game) return { success: false, error: 'Game not found.' } as any; // Added error property
+      
+      const existingPlayer = game.players.find(p => p.id === socketId);
+      if (existingPlayer) { 
+        return { success: true, assignedPlayerId: existingPlayer.playerId, existingPlayers: game.players };
+      }
 
-    if (game.players.length >= 2) {
-      return { success: false }; // Game is full
+      if (game.players.length >= 2) {
+        return { success: false, error: 'Game is full.' } as any;
+      }
+      
+      const assignedPlayerId = (game.players.length === 0 ? 1 : 2) as PlayerId; // Ensure correct assignment
+      game.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId });
+      game.lastActivity = Date.now();
+      
+      const compressedData = LZString.compressToUTF16(JSON.stringify(game));
+      await this.redis.set(this.getFullGameKey(gameId), compressedData, 'EX', this.gameTTL);
+      return { success: true, assignedPlayerId, existingPlayers: game.players };
+    } catch (error) {
+      console.error(`Error adding player to game ${gameId} in Redis:`, error);
+      return { success: false, error: `Failed to add player: ${(error as Error).message}` } as any;
     }
-    
-    const assignedPlayerId = (game.players.length + 1) as PlayerId; // Assign 1 or 2
-    game.players.push({ id: socketId, name: playerName, playerId: assignedPlayerId });
-    game.lastActivity = Date.now();
-    
-    const compressedData = LZString.compressToUTF16(JSON.stringify(game));
-    await this.redis.set(`game:${gameId}`, compressedData);
-    await this.redis.expire(`game:${gameId}`, 3600 * 24);
-    
-    // No public games list management here
-    
-    return { success: true, assignedPlayerId, existingPlayers: game.players };
   }
     
   async deleteGame(gameId: string): Promise<void> {
-    await this.redis.del(`game:${gameId}`);
-    // await this.redis.zrem('public_games', gameId); // No public list
+    try {
+      await this.redis.del(this.getFullGameKey(gameId));
+    } catch (error) {
+      console.error(`Error deleting game ${gameId} from Redis:`, error);
+    }
   }
 
   async removePlayerFromGame(gameId: string, socketId: string): Promise<StoredPlayer | null> {
-    const game = await this.getGame(gameId);
-    if (!game) return null;
+    try {
+      const game = await this.getGame(gameId);
+      if (!game) return null;
 
-    const playerIndex = game.players.findIndex(p => p.id === socketId);
-    if (playerIndex === -1) return null;
+      const playerIndex = game.players.findIndex(p => p.id === socketId);
+      if (playerIndex === -1) return null;
 
-    const removedPlayer = game.players.splice(playerIndex, 1)[0];
-    game.lastActivity = Date.now();
+      const removedPlayer = game.players.splice(playerIndex, 1)[0];
+      game.lastActivity = Date.now();
 
-    if (game.players.length === 0) {
-      await this.deleteGame(gameId);
-    } else {
-      // If game becomes public again with one player (not relevant without public list)
-      const compressedData = LZString.compressToUTF16(JSON.stringify(game));
-      await this.redis.set(`game:${gameId}`, compressedData);
-      await this.redis.expire(`game:${gameId}`, 3600*24);
+      if (game.players.length === 0) {
+        await this.deleteGame(gameId);
+      } else {
+        const compressedData = LZString.compressToUTF16(JSON.stringify(game));
+        await this.redis.set(this.getFullGameKey(gameId), compressedData, 'EX', this.gameTTL);
+      }
+      return removedPlayer;
+    } catch (error) {
+      console.error(`Error removing player from game ${gameId} in Redis:`, error);
+      return null;
     }
-    return removedPlayer;
   }
 }
