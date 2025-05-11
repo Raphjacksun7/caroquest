@@ -1,4 +1,3 @@
-
 "use client";
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
@@ -7,6 +6,7 @@ import { create } from 'zustand';
 import { deserializeGameState } from '@/lib/serialization'; 
 import { applyDeltaUpdatesToGameState } from '@/lib/clientUtils'; 
 import { assignPlayerColors, PAWNS_PER_PLAYER, createInitialGameState as createClientInitialGameState } from '@/lib/gameLogic';
+import LZString from 'lz-string';
 
 export interface GameStoreState {
   gameState: GameState | null;
@@ -93,6 +93,16 @@ const useGameStore = create<GameStoreState>((set, get) => ({
     isWaitingForOpponent: false, pingLatency: 0, players: [],
   }),
 }));
+
+// Helper function to convert string of char codes back to Uint8Array
+function stringToUint8Array(str: string): Uint8Array {
+  const arr = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    arr[i] = str.charCodeAt(i);
+  }
+  return arr;
+}
+
 
 export function useGameConnection() {
   const socketRef = useRef<Socket | null>(null);
@@ -194,13 +204,19 @@ export function useGameConnection() {
       }
     };
     
-    const handleSerializedStateArray = (serializedStateAsArray: number[], origin: string): GameState | null => {
+    const handleSerializedState = (compressedStateAsArray: number[], origin: string): GameState | null => {
       try {
-        if (!Array.isArray(serializedStateAsArray)) {
+        if (!Array.isArray(compressedStateAsArray)) {
             throw new Error("Received game state is not an array as expected.");
         }
-        const uint8ArrayState = new Uint8Array(serializedStateAsArray);
-        const deserialized = deserializeGameState(uint8ArrayState); 
+        const compressedUint8Array = new Uint8Array(compressedStateAsArray);
+        const decompressedBinaryString = LZString.decompressFromUint8Array(compressedUint8Array);
+        if (decompressedBinaryString === null) {
+            throw new Error("LZString decompression returned null.");
+        }
+        const originalBinaryUint8Array = stringToUint8Array(decompressedBinaryString);
+        const deserialized = deserializeGameState(originalBinaryUint8Array); 
+        
         if (typeof deserialized !== 'object' || deserialized === null) {
             throw new Error("Deserialized game state is not a valid object.");
         }
@@ -212,8 +228,8 @@ export function useGameConnection() {
       }
     };
     
-    const handleGameCreated = ({ gameId: newGameId, playerId: newPlayerId, gameState: serializedArr, players: newPlayers, timestamp }: { gameId: string; playerId: PlayerId; gameState: number[]; players: StoredPlayer[], timestamp: number }) => {
-      const decodedState = handleSerializedStateArray(serializedArr, 'game_created');
+    const handleGameCreated = ({ gameId: newGameId, playerId: newPlayerId, gameState: compressedArr, players: newPlayers, timestamp }: { gameId: string; playerId: PlayerId; gameState: number[]; players: StoredPlayer[], timestamp: number }) => {
+      const decodedState = handleSerializedState(compressedArr, 'game_created');
       if (decodedState) {
         setGameId(newGameId);
         setLocalPlayerId(newPlayerId);
@@ -224,8 +240,8 @@ export function useGameConnection() {
       }
     };
 
-    const handleGameJoined = ({ gameId: joinedGameId, playerId: joinedPlayerId, gameState: serializedArr, players: joinedPlayers, opponentName: joinedOpponentName, timestamp }: { gameId: string; playerId: PlayerId; gameState: number[]; players: StoredPlayer[], opponentName: string | null, timestamp: number }) => {
-       const decodedState = handleSerializedStateArray(serializedArr, 'game_joined');
+    const handleGameJoined = ({ gameId: joinedGameId, playerId: joinedPlayerId, gameState: compressedArr, players: joinedPlayers, opponentName: joinedOpponentName, timestamp }: { gameId: string; playerId: PlayerId; gameState: number[]; players: StoredPlayer[], opponentName: string | null, timestamp: number }) => {
+       const decodedState = handleSerializedState(compressedArr, 'game_joined');
        if (decodedState) {
         setGameId(joinedGameId);
         setLocalPlayerId(joinedPlayerId);
@@ -244,8 +260,8 @@ export function useGameConnection() {
         setError(null);
     };
     
-    const handleGameStart = ({ gameState: serializedArr, players: gameStartPlayers, timestamp }: { gameState: number[]; players: StoredPlayer[], timestamp: number }) => {
-        const decodedState = handleSerializedStateArray(serializedArr, 'game_start');
+    const handleGameStart = ({ gameState: compressedArr, players: gameStartPlayers, timestamp }: { gameState: number[]; players: StoredPlayer[], timestamp: number }) => {
+        const decodedState = handleSerializedState(compressedArr, 'game_start');
         if (decodedState) {
             setGameState(decodedState);
             setPlayers(gameStartPlayers);
@@ -254,8 +270,8 @@ export function useGameConnection() {
         }
     };
     
-    const handleGameUpdated = ({ gameState: serializedArr, timestamp, fullUpdate }: { gameState: number[]; timestamp: number; fullUpdate?: boolean}) => {
-        const decodedState = handleSerializedStateArray(serializedArr, 'game_updated (full)');
+    const handleGameUpdated = ({ gameState: compressedArr, timestamp, fullUpdate }: { gameState: number[]; timestamp: number; fullUpdate?: boolean}) => {
+        const decodedState = handleSerializedState(compressedArr, 'game_updated (full)');
         if (decodedState) {
             setGameState(decodedState);
             setError(null);

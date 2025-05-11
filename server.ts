@@ -1,11 +1,10 @@
-
 import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { setupGameSockets } from './src/lib/socketHandler';
 import { setupMatchmaking } from './src/lib/matchmaking';
-import { gameStore } from './src/lib/gameStore'; 
+import { gameStore, GameStore } from './src/lib/gameStore'; 
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -44,11 +43,10 @@ app.prepare().then(async () => {
   
   console.log('Socket.IO: Using in-memory adapter. Multiplayer features will be limited to a single server instance.');
   
-  // Pass the gameStore instance to matchmaking and socket handlers
   setupMatchmaking(io, gameStore); 
   setupGameSockets(io, gameStore);
 
-  server.listen(port, (err?: any) => {
+  server.listen(port, (err?: any) => { // Added explicit type for err
     if (err) {
         console.error("Failed to start server:", err);
         throw err;
@@ -75,9 +73,9 @@ app.prepare().then(async () => {
       }
       console.log('HTTP server closed.');
 
-      if (gameStore && typeof gameStore.destroy === 'function') {
+      if (gameStore && typeof (gameStore as GameStore).destroy === 'function') {
         try {
-          gameStore.destroy(); 
+          (gameStore as GameStore).destroy(); 
           console.log('GameStore destroyed.');
         } catch (storeError) {
           console.error('Error destroying GameStore:', storeError);
@@ -92,17 +90,15 @@ app.prepare().then(async () => {
         } else {
           console.log('Socket.IO server closed.');
         }
-        // Ensure process exits after all cleanup
         console.log('Exiting process.');
         process.exit(0);
       });
     });
 
-    // Force exit if graceful shutdown takes too long
     setTimeout(() => {
       console.error('Graceful shutdown timed out. Forcing exit.');
       process.exit(1);
-    }, 10000); // 10 seconds timeout
+    }, 10000); 
   };
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
