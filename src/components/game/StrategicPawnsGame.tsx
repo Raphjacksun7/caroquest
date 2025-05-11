@@ -7,8 +7,8 @@ import {
   createInitialGameState, 
   placePawn as placePawnLogic, 
   movePawn as movePawnLogic, 
-  selectPawn,  // Changed from selectPawn as selectPawnLogic
-  clearSelection, // Changed from clearSelection as clearSelectionLogic
+  selectPawn,
+  clearSelection,
   PAWNS_PER_PLAYER
 } from '@/lib/gameLogic';
 
@@ -23,7 +23,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog } from '@/components/ui/dialog';
 import { useTranslation } from '@/hooks/useTranslation';
-import { useGameConnection, type PlayerInfo as RemotePlayerInfo, useGameStore } from '@/hooks/useGameConnection';
+import { useGameConnection, type StoredPlayer as RemotePlayerInfo, useGameStore } from '@/hooks/useGameConnection';
 import { useAI } from '@/hooks/useAI';
 import { WaitingRoom } from '@/components/game/WaitingRoom';
 import { useRouter, useSearchParams, useParams } from 'next/navigation';
@@ -341,7 +341,7 @@ export function StrategicPawnsGame() {
                     ))}
                   </RadioGroup>
                 </div>
-                <Button onClick={()={() => handleStartGameMode('ai')} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground py-3 text-base font-semibold rounded-lg shadow-md transition-transform hover:scale-105">
+                <Button onClick={() => handleStartGameMode('ai')} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground py-3 text-base font-semibold rounded-lg shadow-md transition-transform hover:scale-105">
                   <Bot className="mr-2 h-5 w-5"/> {t('startGame')}
                 </Button>
               </TabsContent>

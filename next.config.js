@@ -4,7 +4,8 @@ const nextConfig = {
   experimental: {
     allowedDevOrigins: [
       "3000-firebase-studio-1746739921276.cluster-hf4yr35cmnbd4vhbxvfvc6cp5q.cloudworkstations.dev",
-      "localhost:3000"
+      "localhost:3000",
+      "*" // Allow all origins in development
     ]
   },
   typescript: {
