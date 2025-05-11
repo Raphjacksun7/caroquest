@@ -1,7 +1,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { GameState, PlayerId, StoredPlayer, GameOptions } from './types'; 
-import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors } from './gameLogic';
+import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors, initializeBoard } from './gameLogic'; // Added initializeBoard
 import { nanoid } from 'nanoid';
 
 // Interface for the actual data stored for each game
@@ -12,7 +12,7 @@ interface GameData {
   lastActivity: number;
   options: GameOptions;
   sequenceId: number;
-  createdAt: number;
+  createdAt: number; // Added missing createdAt property
 }
 
 export interface GameStore {
@@ -53,7 +53,7 @@ class InMemoryGameStore implements GameStore {
   public async createGame(creatorSocketId: string, creatorName: string, options: GameOptions = {}): Promise<string> {
     const gameId = options.gameIdToCreate || nanoid(8).toUpperCase();
     const pawns = options.pawnsPerPlayer || PAWNS_PER_PLAYER;
-    const initialState = createInitialGameState(pawns);
+    const initialState = createInitialGameState(pawns); // Pass pawns to initial state creation
 
     const gameData: GameData = {
       id: gameId,
@@ -62,17 +62,23 @@ class InMemoryGameStore implements GameStore {
       lastActivity: Date.now(),
       options,
       sequenceId: 0,
-      createdAt: Date.now(),
+      createdAt: Date.now(), // Ensure createdAt is set
     };
 
     this.inMemoryGames.set(gameId, gameData);
     console.log(`GameStore (in-memory): Created game ${gameId} for ${creatorName}`);
     return gameId;
   }
-
+  
   private hydrateGameState(state: GameState): GameState {
+    // Ensure board is initialized if it's missing or malformed
+    const board = (state.board && state.board.length === BOARD_SIZE * BOARD_SIZE) 
+                  ? state.board 
+                  : initializeBoard();
+
     return {
       ...state,
+      board, // Use potentially re-initialized board
       playerColors: state.playerColors || assignPlayerColors(),
       blockedPawnsInfo: new Set(Array.from(state.blockedPawnsInfo || [])),
       blockingPawnsInfo: new Set(Array.from(state.blockingPawnsInfo || [])),
@@ -92,6 +98,7 @@ class InMemoryGameStore implements GameStore {
     const gameData = this.inMemoryGames.get(gameId);
     if (!gameData) return null;
     
+    // Create a deep copy to prevent direct modification of stored state
     const deepCopiedGameData = JSON.parse(JSON.stringify(gameData)) as GameData;
     deepCopiedGameData.state = this.hydrateGameState(deepCopiedGameData.state); 
     return deepCopiedGameData;
@@ -134,7 +141,8 @@ class InMemoryGameStore implements GameStore {
 
   public async deleteGame(gameId: string): Promise<void> {
     this.inMemoryGames.delete(gameId);
-    gamePreviousStates.delete(gameId); // Also remove from previousStates cache in socketHandler
+    // Also remove from previousStates cache if it's managed globally or passed here
+    // For now, assuming socketHandler manages its own cache or it's not needed.
     console.log(`GameStore (in-memory): Deleted game ${gameId}`);
   }
 
@@ -183,12 +191,11 @@ class InMemoryGameStore implements GameStore {
       this.cleanupInterval = null;
     }
     this.inMemoryGames.clear();
-    gamePreviousStates.clear();
     console.log('GameStore (in-memory): Destroyed and cleared all games.');
   }
 }
 
-// Export a singleton instance
 export const gameStore: GameStore = new InMemoryGameStore();
-// Cache for previous game states used for delta updates
-export const gamePreviousStates = new Map<string, GameState>();
+// Cache for previous game states used for delta updates, if needed globally.
+// For now, it's managed within socketHandler if used.
+// export const gamePreviousStates = new Map<string, GameState>();

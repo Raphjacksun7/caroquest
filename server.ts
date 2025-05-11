@@ -44,6 +44,7 @@ app.prepare().then(async () => {
   
   console.log('Socket.IO: Using in-memory adapter. Multiplayer features will be limited to a single server instance.');
   
+  // Pass the gameStore instance to matchmaking and socket handlers
   setupMatchmaking(io, gameStore); 
   setupGameSockets(io, gameStore);
 
@@ -67,7 +68,7 @@ app.prepare().then(async () => {
   const gracefulShutdown = (signal: string) => {
     console.log(`Received ${signal}. Initiating graceful shutdown...`);
     
-    server.close((err) => {
+    server.close((err) => { 
       if (err) {
         console.error('Error closing HTTP server:', err);
         process.exit(1); 
@@ -81,6 +82,8 @@ app.prepare().then(async () => {
         } catch (storeError) {
           console.error('Error destroying GameStore:', storeError);
         }
+      } else {
+        console.warn('GameStore not available or destroy method missing during shutdown.');
       }
       
       io.close((ioErr) => {
@@ -89,14 +92,17 @@ app.prepare().then(async () => {
         } else {
           console.log('Socket.IO server closed.');
         }
+        // Ensure process exits after all cleanup
+        console.log('Exiting process.');
         process.exit(0);
       });
     });
 
+    // Force exit if graceful shutdown takes too long
     setTimeout(() => {
       console.error('Graceful shutdown timed out. Forcing exit.');
       process.exit(1);
-    }, 10000); 
+    }, 10000); // 10 seconds timeout
   };
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

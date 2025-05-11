@@ -1,16 +1,17 @@
 
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { GameStore } from './gameStore'; 
-import { gamePreviousStates } from './gameStore'; // Import gamePreviousStates
 import { 
   serializeGameState,
-  // createDeltaUpdate // Delta updates can be re-added later if needed
+  createDeltaUpdate 
 } from './serialization';
 import { 
   placePawn as placePawnLogic,
-  movePawn as movePawnLogic
+  movePawn as movePawnLogic,
+  createInitialGameState // Import if needed for direct use, though gameStore should handle it
 } from './gameLogic'; 
 import type { GameState, PlayerId, GameOptions, StoredPlayer } from './types';
+import LZString from 'lz-string';
 
 const RATE_LIMIT_CONFIG = {
   maxRequests: 20, 
@@ -26,6 +27,11 @@ interface ClientRateLimitInfo {
   count: number;
   lastResetTime: number;
 }
+
+// This map should ideally be part of the GameStore or a separate state management module
+// if it needs to persist or be shared across server instances (though not an issue with in-memory store).
+const gamePreviousStates = new Map<string, GameState>();
+
 
 export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
   const clientRateLimits = new Map<string, ClientRateLimitInfo>();
@@ -85,11 +91,12 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
         gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(game.state)));
         
         const binaryState = serializeGameState(game.state);
+        const compressedState = LZString.compressToUint8Array(binaryState);
         
         socket.emit('game_created', { 
           gameId, 
           playerId: 1 as PlayerId, 
-          gameState: Array.from(binaryState), 
+          gameState: Array.from(compressedState), 
           players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId, isConnected: p.isConnected, rating: p.rating })),
           timestamp: Date.now()
         });
@@ -121,10 +128,11 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
                  gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(game.state)));
             }
             const binaryState = serializeGameState(game.state);
+            const compressedState = LZString.compressToUint8Array(binaryState);
             socket.emit('game_joined', { 
               gameId, 
               playerId: existingPlayer.playerId, 
-              gameState: Array.from(binaryState), 
+              gameState: Array.from(compressedState), 
               players: game.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId, isConnected: p.isConnected, rating: p.rating })),
               opponentName: game.players.find(p => p.id !== socket.id)?.name || null,
               timestamp: Date.now()
@@ -156,11 +164,12 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
         gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(updatedGame.state)));
         
         const binaryStateOnJoin = serializeGameState(updatedGame.state);
+        const compressedStateOnJoin = LZString.compressToUint8Array(binaryStateOnJoin);
         
         socket.emit('game_joined', { 
           gameId, 
           playerId: result.assignedPlayerId, 
-          gameState: Array.from(binaryStateOnJoin), 
+          gameState: Array.from(compressedStateOnJoin), 
           players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId, isConnected: p.isConnected, rating: p.rating })),
           opponentName: updatedGame.players.find(p => p.id !== socket.id)?.name || null,
           timestamp: Date.now()
@@ -175,7 +184,7 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
         
         if (updatedGame.players.filter(p => p.isConnected).length === 2) {
             const gameStartPayload = { 
-                gameState: Array.from(binaryStateOnJoin), 
+                gameState: Array.from(compressedStateOnJoin), 
                 players: updatedGame.players.map(p => ({id: p.id, name: p.name, playerId: p.playerId, isConnected: p.isConnected, rating: p.rating })),
                 timestamp: Date.now() 
             };
@@ -234,18 +243,31 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
             socket.emit('game_error', { message: 'Failed to update game state on server.' }); return;
           }
           
+          const previousState = gamePreviousStates.get(gameId) || currentGameState; // Fallback to current if previous not found
+          const deltaUpdates = createDeltaUpdate(previousState, newState);
           gamePreviousStates.set(gameId, JSON.parse(JSON.stringify(newState))); 
           
           const updatedGame = await gameStore.getGame(gameId); 
           if (!updatedGame) { socket.emit('game_error', { message: 'Internal server error retrieving updated game.' }); return;}
 
-          const binaryStateFull = serializeGameState(newState);
-          
-          io.to(gameId).emit('game_updated', { 
-            gameState: Array.from(binaryStateFull), 
-            timestamp: Date.now(),
-            fullUpdate: true 
-          });
+          const shouldSendFullState = updatedGame.sequenceId % 10 === 0 || deltaUpdates.length > 5;
+
+          if (shouldSendFullState) {
+            const binaryStateFull = serializeGameState(newState);
+            const compressedStateFull = LZString.compressToUint8Array(binaryStateFull);
+            io.to(gameId).emit('game_updated', { 
+              gameState: Array.from(compressedStateFull), 
+              timestamp: Date.now(),
+              fullUpdate: true 
+            });
+          } else {
+            // For delta, compress each part or send as JSON - here sending as JSON for simplicity
+            io.to(gameId).emit('game_delta', { 
+              updates: deltaUpdates,
+              seqId: updatedGame.sequenceId,
+              timestamp: Date.now()
+            });
+          }
 
         } catch (error: any) {
           console.error(`Socket.IO: Error handling ${actionType}:`, error);
@@ -261,8 +283,9 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
         const game = await gameStore.getGame(gameId);
         if (game) {
             const fullBinaryState = serializeGameState(game.state);
+            const compressedFullState = LZString.compressToUint8Array(fullBinaryState);
             const fullStateData = { 
-                gameState: Array.from(fullBinaryState), 
+                gameState: Array.from(compressedFullState), 
                 timestamp: Date.now(),
                 fullUpdate: true
             };

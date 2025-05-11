@@ -24,9 +24,6 @@ export function setupMatchmaking(io: SocketIOServer, gameStore: GameStore) {
   matchmakingInterval = setInterval(async () => {
     if (matchmakingQueue.length >= 2) {
       matchmakingQueue.sort((a, b) => {
-        // Prioritize players with similar ratings (optional, simple FIFO for now)
-        // const ratingDiff = Math.abs(a.rating - b.rating);
-        // if (ratingDiff < 100) return a.joinTime - b.joinTime; // If ratings are close, FIFO
         return a.joinTime - b.joinTime; // Simple FIFO
       });
       
@@ -38,12 +35,10 @@ export function setupMatchmaking(io: SocketIOServer, gameStore: GameStore) {
           const gameOptions: GameOptions = { 
             isMatchmaking: true, 
             isPublic: false, 
-            isRanked: true // Assume matchmade games are ranked
+            isRanked: true 
           };
-          // Player 1 creates the game
-          const gameId = await gameStore.createGame(player1Entry.socketId, player1Entry.name, gameOptions);
           
-          // Player 2 joins the game
+          const gameId = await gameStore.createGame(player1Entry.socketId, player1Entry.name, gameOptions);
           const joinResult = await gameStore.addPlayerToGame(gameId, player2Entry.socketId, player2Entry.name);
 
           if (joinResult.success && joinResult.assignedPlayerId !== undefined) {
@@ -52,7 +47,6 @@ export function setupMatchmaking(io: SocketIOServer, gameStore: GameStore) {
             const finalGameData = await gameStore.getGame(gameId);
             if (!finalGameData) {
                 console.error("Matchmaking: Failed to retrieve game data after match creation for P1.");
-                // Re-queue players if game data is missing
                 matchmakingQueue.unshift(player1Entry);
                 matchmakingQueue.unshift(player2Entry);
                 return;
@@ -65,14 +59,16 @@ export function setupMatchmaking(io: SocketIOServer, gameStore: GameStore) {
               player1Entry.socket.emit('match_found', { 
                   gameId, 
                   opponentName: player2Entry.name, 
-                  assignedPlayerId: assignedP1Id
+                  assignedPlayerId: assignedP1Id,
+                  timestamp: Date.now()
               });
             }
-             if (assignedP2Id) {
+            if (assignedP2Id) {
                 player2Entry.socket.emit('match_found', { 
                     gameId, 
                     opponentName: player1Entry.name, 
-                    assignedPlayerId: assignedP2Id
+                    assignedPlayerId: assignedP2Id,
+                    timestamp: Date.now()
                 });
             }
           } else {
@@ -87,14 +83,14 @@ export function setupMatchmaking(io: SocketIOServer, gameStore: GameStore) {
         }
       }
     }
-  }, 5000); // Check every 5 seconds
+  }, 5000); 
 
   return () => {
     if (matchmakingInterval) {
       clearInterval(matchmakingInterval);
       matchmakingInterval = null;
     }
-    matchmakingQueue.length = 0; // Clear the queue on shutdown
+    matchmakingQueue.length = 0; 
     console.log('Matchmaking: Stopped and cleared in-memory queue.');
   };
 }
@@ -110,12 +106,13 @@ export function addToMatchmakingQueue(socket: Socket, playerName: string, rating
     name: playerName, 
     rating, 
     joinTime: Date.now(), 
-    socket // Keep socket reference for direct emits
+    socket 
   };
   matchmakingQueue.push(player);
   socket.emit('matchmaking_joined', { 
     message: 'Added to matchmaking queue.', 
-    position: matchmakingQueue.length 
+    position: matchmakingQueue.length,
+    timestamp: Date.now() 
   });
   console.log(`Matchmaking: ${playerName} (ID: ${socket.id}) added to queue. Queue size: ${matchmakingQueue.length}`);
 }
@@ -124,9 +121,11 @@ export function removeFromMatchmakingQueue(socketId: string): boolean {
   const index = matchmakingQueue.findIndex(p => p.socketId === socketId);
   if (index > -1) {
     const removedPlayer = matchmakingQueue.splice(index, 1)[0];
-    // Emit to the specific player's socket if it's still valid
     if (removedPlayer && removedPlayer.socket && removedPlayer.socket.connected) {
-        removedPlayer.socket.emit('matchmaking_left', { message: 'Removed from queue by server or disconnect.' });
+        removedPlayer.socket.emit('matchmaking_left', { 
+          message: 'Removed from queue by server or disconnect.',
+          timestamp: Date.now()
+        });
     }
     console.log(`Matchmaking: Player ${socketId} removed from queue. Queue size: ${matchmakingQueue.length}`);
     return true;
