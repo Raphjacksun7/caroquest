@@ -1,3 +1,4 @@
+
 "use client";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -90,12 +91,12 @@ export const RulesDialog = ({ pawnsPerPlayer }: RulesDialogProps) => {
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="w-5 h-5 bg-[hsl(var(--board-light-square))] flex items-center justify-center relative border border-muted">
-                        <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone))] opacity-50 text-2xl font-bold pointer-events-none">×</div>
+                        <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone-marker))] opacity-50 text-2xl font-bold pointer-events-none">×</div>
                     </div> {t('deadZoneSquare')}
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="w-5 h-5 bg-[hsl(var(--board-light-square))] flex items-center justify-center relative border border-muted">
-                        <div className="absolute w-2 h-2 bg-[hsl(var(--highlight-valid-move))] rounded-full opacity-70 pointer-events-none" />
+                        <div className="absolute w-2 h-2 bg-[hsl(var(--highlight-valid-move-indicator))] rounded-full opacity-70 pointer-events-none" />
                     </div> {t('validMoveSquare')}
                 </div>
             </div>
@@ -110,4 +111,6 @@ export const RulesDialog = ({ pawnsPerPlayer }: RulesDialogProps) => {
     </DialogContent>
   );
 };
+    
+
     
