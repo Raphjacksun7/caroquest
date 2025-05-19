@@ -52,7 +52,7 @@ class InMemoryGameStore implements GameStore {
   public async createGame(creatorSocketId: string, creatorName: string, options: GameOptions = {}): Promise<string> {
     const gameId = options.gameIdToCreate || nanoid(8).toUpperCase();
     const pawns = options.pawnsPerPlayer || PAWNS_PER_PLAYER;
-    const initialState = createInitialGameState(pawns); 
+    const initialState = createInitialGameState(); 
 
     const gameData: GameData = {
       id: gameId,

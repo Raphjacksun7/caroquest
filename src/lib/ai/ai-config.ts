@@ -1,6 +1,5 @@
-
 import type { GameState, PlayerId } from '../../lib/gameLogic';
-import { MCTS, Action } from './mcts'; // Assuming Action is exported from mcts.ts
+import { MCTS, MCTSNode, type Action } from './mcts'; // Add MCTSNode to imports
 
 export interface AIConfigFeatures {
   config: {
@@ -12,45 +11,60 @@ export interface AIConfigFeatures {
 
 export const AI_CONFIG: AIConfigFeatures['config'] = {
   easy: {
-    iterations: 100,      // Fewer iterations for easier AI
-    exploration: 2.0,     // Higher exploration for more varied moves
-    simulationDepth: 5    // Shorter simulation depth
+    iterations: 5000,      // Fewer iterations for easier AI
+    exploration: Math.sqrt(8),     // Higher exploration for more varied moves
+    simulationDepth: 20    // Shorter simulation depth
   },
   medium: {
-    iterations: 500,      // Default iterations
-    exploration: Math.sqrt(2), // Standard exploration weight
-    simulationDepth: 10
+    iterations: 10000,      // Default iterations
+    exploration: Math.sqrt(4), // Standard exploration weight (reduced from Math.sqrt(16))
+    simulationDepth: 25
   },
   hard: {
-    iterations: 1500,     // More iterations for harder AI
-    exploration: 1.0,     // Lower exploration for more optimal (but potentially predictable) moves
-    simulationDepth: 15
+    iterations: 15000,     // More iterations for harder AI
+    exploration: Math.sqrt(2),     // Lower exploration for more optimal moves (reduced from Math.sqrt(16))
+    simulationDepth: 30
   }
 };
+
 
 export async function getAIMove(
   gameState: GameState, 
   difficulty: keyof AIConfigFeatures['config']
 ): Promise<Action | null> {
-  const config = AI_CONFIG[difficulty];
-  if (!config) {
-    console.error(`Invalid AI difficulty: ${difficulty}. Defaulting to medium.`);
-    // difficulty = 'medium'; // This line causes type error if difficulty is not 'easy'|'medium'|'hard'
-    // config = AI_CONFIG.medium; 
-  }
-  
-  const mcts = new MCTS(gameState, difficulty, config);
+  // Use a default config if the specified difficulty doesn't exist
+  const config = AI_CONFIG[difficulty] || AI_CONFIG.medium;
   
   // For "easy" difficulty, add a chance to make a less optimal (more random but valid) move
   if (difficulty === 'easy' && Math.random() < 0.3) { // 30% chance of a more random move
-    const node = new MCTSNode(gameState); // Temporary node to get valid actions
+    const node = new MCTSNode(gameState); 
     const validActions = node.getValidActions(gameState);
     if (validActions.length > 0) {
         // Select a random action, but prefer those with a decent heuristic score
-        const scoredActions = validActions.map(action => ({
-            action,
-            score: node.evaluateAction(gameState, action) // Assuming evaluateAction is accessible
-        }));
+        const scoredActions = validActions.map(action => {
+            let score;
+            if (action.type === 'move' && action.fromIndex !== undefined && action.toIndex !== undefined) {
+                // For movement actions, use evaluateMove
+                score = node.evaluateMove(gameState, action.fromIndex, action.toIndex);
+            } else if (action.type === 'place') {
+                // For placement actions, use a simpler evaluation
+                const index = action.squareIndex !== undefined ? action.squareIndex : action.toIndex;
+                if (index !== undefined) {
+                    // Calculate a basic placement quality score
+                    const row = Math.floor(index / 8);
+                    const col = index % 8;
+                    
+                    // Prefer central squares
+                    const distanceFromCenter = Math.abs(row - 3.5) + Math.abs(col - 3.5);
+                    score = 7 - distanceFromCenter; // Higher score for central squares
+                }
+            } else {
+                score = 0; // Default score for 'none' actions
+            }
+            
+            return { action, score: score || 0 };
+        });
+        
         const nonLosingActions = scoredActions.filter(sa => sa.score > -1000); // Avoid immediate blunders
         if (nonLosingActions.length > 0) {
             return nonLosingActions[Math.floor(Math.random() * nonLosingActions.length)].action;
@@ -59,60 +73,7 @@ export async function getAIMove(
     }
   }
 
+  // Use the full MCTS algorithm
+  const mcts = new MCTS(gameState, difficulty, config);
   return mcts.findBestAction();
-}
-
-// Re-add MCTSNode here or ensure it's correctly imported if mcts.ts exports it.
-// For simplicity if mcts.ts does not export MCTSNode directly to ai-config.ts:
-class MCTSNode {
-  state: GameState;
-  // ... other MCTSNode properties and methods if needed directly by getAIMove's easy logic
-  // For now, assume getValidActions and evaluateAction can be accessed or adapted
-  constructor(state: GameState) {
-    this.state = state;
-  }
-  getValidActions(state: GameState): Action[] {
-     // Simplified version for this context. Real logic is in mcts.ts
-    const actions: Action[] = [];
-    const playerId = state.currentPlayerId;
-    if (state.gamePhase === 'placement') {
-      for (let i = 0; i < state.board.length; i++) {
-        if (isValidPlacement(i, playerId, state)) {
-          actions.push({ type: 'place', index: i });
-        }
-      }
-    } else {
-      for (let fromIdx = 0; fromIdx < state.board.length; fromIdx++) {
-        const square = state.board[fromIdx];
-        if (square.pawn?.playerId === playerId && !state.blockedPawnsInfo.has(fromIdx)) {
-          const validDestinations = getValidMoveDestinations(fromIdx, playerId, state);
-          for (const toIdx of validDestinations) {
-            actions.push({ type: 'move', fromIndex: fromIdx, toIndex: toIdx });
-          }
-        }
-      }
-    }
-    return actions.length > 0 ? actions : [{type: 'none'}];
-  }
-
-  applyActionToState(state: GameState, action: Action): GameState | null {
-    let newState: GameState | null = null;
-    const tempState = structuredClone(state);
-
-    if (action.type === 'place' && action.index !== undefined) {
-      newState = applyPlacePawn(tempState, action.index);
-    } else if (action.type === 'move' && action.fromIndex !== undefined && action.toIndex !== undefined) {
-      newState = applyMovePawn(tempState, action.fromIndex, action.toIndex);
-    }
-    return newState;
-  }
-
-  evaluateAction(state: GameState, action: Action): number {
-    let score = Math.random() * 0.01;
-    const tempStatePreview = this.applyActionToState(structuredClone(state), action);
-    if (!tempStatePreview) return -Infinity;
-    if (tempStatePreview.winner === state.currentPlayerId) return Infinity;
-    if (tempStatePreview.winner && tempStatePreview.winner !== state.currentPlayerId) score -= 1000;
-    return score;
-  }
 }

@@ -42,3 +42,6 @@ next-env.d.ts
 # Firebase
 firebase-debug.log
 *.firebase*
+
+
+/.token/

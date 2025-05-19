@@ -34,6 +34,7 @@ export interface GameState {
   lastMove: { from: number | null, to: number } | null; 
   winningLine: number[] | null; 
   highlightedValidMoves?: number[];
+  options?: GameOptions; // Added options field
 }
 
 export interface StoredPlayer {

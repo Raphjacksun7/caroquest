@@ -1,105 +1,2336 @@
-import type { GameState, PlayerId } from '../../lib/gameLogic';
-import { 
-  placePawn as applyPlacePawnLogic, 
-  movePawn as applyMovePawnLogic, 
-  isValidPlacement as checkIsValidPlacement, 
-  getValidMoveDestinations as getValidMovesLogic,
-  // checkWinCondition, // isTerminal and getReward use gameState.winner directly
-  // updateBlockingStatus, // Not needed for MCTS node's internal state updates, applyActionToState does it
-  // updateDeadZones,      // Not needed for MCTS node's internal state updates, applyActionToState does it
-  BOARD_SIZE
-} from '../../lib/gameLogic'; 
-// import type { AIConfigFeatures } from './ai-config'; // Not used in this file
+// import type { GameState, PlayerId } from "../../lib/gameLogic";
+// import {
+//   placePawn,
+//   movePawn,
+//   isValidPlacement,
+//   getValidMoveDestinations,
+//   BOARD_SIZE,
+// } from "../../lib/gameLogic";
+
+// export interface Action {
+//   type: "place" | "move" | "none";
+//   squareIndex?: number;
+//   fromIndex?: number;
+//   toIndex?: number;
+//   quality?: number;
+// }
+
+// export class MCTSNode {
+//   state: GameState;
+//   parent: MCTSNode | null;
+//   action: Action | null;
+//   children: MCTSNode[];
+//   visits: number;
+//   wins: number;
+//   playerWhoseTurnItIs: PlayerId;
+//   untriedActions: Action[];
+//   boardEvaluationCache: Map<string, number>;
+
+//   constructor(
+//     state: GameState,
+//     parent: MCTSNode | null = null,
+//     action: Action | null = null
+//   ) {
+//     this.state = structuredClone(state);
+//     this.parent = parent;
+//     this.action = action;
+//     this.children = [];
+//     this.visits = 0;
+//     this.wins = 0;
+//     this.playerWhoseTurnItIs = this.state.currentPlayerId;
+//     this.untriedActions = this.getValidActions(this.state);
+//     this.boardEvaluationCache = new Map<string, number>();
+//   }
+
+//   // Get valid actions, sorted by heuristic quality
+//   getValidActions(state: GameState): Action[] {
+//     const actions: Action[] = [];
+//     const playerId = state.currentPlayerId;
+
+//     if (state.gamePhase === "placement") {
+//       // For placement phase, we need to prioritize edges strategically
+//       const placementCandidates: Action[] = [];
+//       const opponentId = playerId === 1 ? 2 : 1;
+
+//       // Count how many pawns each player has placed
+//       let myPlacedPawns = state.placedPawns[playerId];
+//       let opponentPlacedPawns = state.placedPawns[opponentId];
+
+//       // Get all valid placement options first
+//       for (let i = 0; i < state.board.length; i++) {
+//         if (isValidPlacement(i, playerId, state)) {
+//           const row = Math.floor(i / BOARD_SIZE);
+//           const col = i % BOARD_SIZE;
+
+//           // Calculate if this is an edge or corner position
+//           const isEdgeRow = row === 0 || row === BOARD_SIZE - 1;
+//           const isEdgeCol = col === 0 || col === BOARD_SIZE - 1;
+//           const isEdge = isEdgeRow || isEdgeCol;
+//           const isCorner = isEdgeRow && isEdgeCol;
+
+//           // Start with base quality score
+//           let placementQuality = 0;
+
+//           // Strategic placement logic:
+//           // 1. First priority: Block opponent diagonal formations
+//           const blockingValue = this.evaluateBlockingDiagonalInPlacement(
+//             state,
+//             i,
+//             opponentId
+//           );
+//           if (blockingValue > 0) {
+//             placementQuality += blockingValue * 30; // Very high priority for blocking
+//           }
+
+//           // 2. For offensive strategy: Prioritize edge placements
+//           // First several moves: prioritize edges and corners for first player
+//           if (playerId === 1 || myPlacedPawns <= 2) {
+//             if (isCorner) {
+//               placementQuality += 25; // Highest priority for corners
+//             } else if (isEdge) {
+//               placementQuality += 20; // High priority for edges
+//             } else {
+//               // Gradually decrease priority as we move toward center
+//               const distanceFromEdge = Math.min(
+//                 row,
+//                 col,
+//                 BOARD_SIZE - 1 - row,
+//                 BOARD_SIZE - 1 - col
+//               );
+//               placementQuality += 15 - distanceFromEdge * 5; // Decreases as we move inward
+//             }
+//           }
+//           // Later in the game: More balanced approach
+//           else {
+//             // For edge placement strategy
+//             if (isCorner) {
+//               placementQuality += 15; // Still good but not as critical later
+//             } else if (isEdge) {
+//               placementQuality += 10;
+//             }
+
+//             // Also consider diagonal formation potential
+//             placementQuality +=
+//               this.evaluateOffensiveDiagonalPotential(state, i, playerId) * 2;
+//           }
+
+//           // 3. For second player: Need more defensive stance
+//           if (playerId === 2) {
+//             // Add blocking incentive
+//             placementQuality += blockingValue * 10; // Additional blocking bonus
+//           }
+
+//           // Add the placement option with its calculated quality
+//           placementCandidates.push({
+//             type: "place",
+//             squareIndex: i,
+//             toIndex: i,
+//             quality: placementQuality,
+//           });
+//         }
+//       }
+
+//       // Sort placements by quality (highest first)
+//       placementCandidates.sort((a, b) => (b.quality || 0) - (a.quality || 0));
+//       actions.push(...placementCandidates);
+//     } else {
+//       // Movement phase
+//       // First, check for any winning moves
+//       const potentialWinningMoves: Action[] = [];
+//       const normalMoves: Action[] = [];
+
+//       for (let fromIdx = 0; fromIdx < state.board.length; fromIdx++) {
+//         const square = state.board[fromIdx];
+//         if (
+//           square.pawn?.playerId === playerId &&
+//           !state.blockedPawnsInfo.has(fromIdx)
+//         ) {
+//           const validDestinations = getValidMoveDestinations(
+//             fromIdx,
+//             playerId,
+//             state
+//           );
+
+//           for (const toIdx of validDestinations) {
+//             // Try the move and see if it leads to a win
+//             const moveAction = {
+//               type: "move" as const,
+//               fromIndex: fromIdx,
+//               toIndex: toIdx,
+//             };
+
+//             const resultState = this.applyActionToState(
+//               structuredClone(state),
+//               moveAction
+//             );
+//             if (resultState && resultState.winner === playerId) {
+//               // This is a winning move! Prioritize it
+//               potentialWinningMoves.push(moveAction);
+//             } else {
+//               // Evaluate the move quality using heuristics
+//               const quality = this.evaluateMove(state, fromIdx, toIdx);
+//               normalMoves.push({
+//                 ...moveAction,
+//                 quality,
+//               });
+//             }
+//           }
+//         }
+//       }
+
+//       // Sort normal moves by quality
+//       normalMoves.sort((a, b) => (b.quality || 0) - (a.quality || 0));
+
+//       // Put winning moves first, then sorted normal moves
+//       actions.push(...potentialWinningMoves, ...normalMoves);
+//     }
+
+//     return actions.length > 0 ? actions : [{ type: "none" }];
+//   }
+
+//   // Add these new methods to the MCTSNode class
+
+//   // New method to evaluate blocking during placement
+//   evaluateBlockingDiagonalInPlacement(
+//     state: GameState,
+//     position: number,
+//     opponentId: PlayerId
+//   ): number {
+//     const board = state.board;
+//     const row = Math.floor(position / BOARD_SIZE);
+//     const col = position % BOARD_SIZE;
+//     let maxBlockingValue = 0;
+
+//     // Check all 4 diagonal directions
+//     const directions = [
+//       { dr: 1, dc: 1 }, // Down-right
+//       { dr: 1, dc: -1 }, // Down-left
+//       { dr: -1, dc: 1 }, // Up-right
+//       { dr: -1, dc: -1 }, // Up-left
+//     ];
+
+//     for (const direction of directions) {
+//       // Look in both directions (forward and backward along diagonal)
+//       let opponentPawnsInLine = 0;
+//       let emptyValidSquares = 0;
+
+//       // Check 3 steps in each direction along the diagonal
+//       for (let step = -3; step <= 3; step++) {
+//         if (step === 0) continue; // Skip the position itself
+
+//         const r = row + direction.dr * step;
+//         const c = col + direction.dc * step;
+
+//         // Skip invalid positions
+//         if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) continue;
+
+//         const idx = r * BOARD_SIZE + c;
+//         const square = board[idx];
+
+//         // Count opponent pawns in this diagonal
+//         if (
+//           square.pawn?.playerId === opponentId &&
+//           square.boardColor === state.playerColors[opponentId]
+//         ) {
+//           opponentPawnsInLine++;
+//         }
+//         // Count empty spots that could form a diagonal
+//         else if (
+//           !square.pawn &&
+//           square.boardColor === state.playerColors[opponentId]
+//         ) {
+//           emptyValidSquares++;
+//         }
+//       }
+
+//       // Calculate blocking value - critical when opponent has 2+ pawns
+//       let blockingValue = 0;
+//       if (opponentPawnsInLine >= 2) {
+//         // Very high value for blocking 2+ pawns in a diagonal
+//         blockingValue = 10 * opponentPawnsInLine;
+
+//         // Even higher if they also have empty spots to complete a 4-in-a-row
+//         if (opponentPawnsInLine + emptyValidSquares >= 4) {
+//           blockingValue += 20;
+//         }
+//       }
+
+//       // Keep track of highest blocking value across all diagonals
+//       maxBlockingValue = Math.max(maxBlockingValue, blockingValue);
+//     }
+
+//     return maxBlockingValue;
+//   }
+
+//   // New method to evaluate offensive diagonal potential for placement
+//   evaluateOffensiveDiagonalPotential(
+//     state: GameState,
+//     position: number,
+//     playerId: PlayerId
+//   ): number {
+//     const board = state.board;
+//     const row = Math.floor(position / BOARD_SIZE);
+//     const col = position % BOARD_SIZE;
+//     let maxPotential = 0;
+
+//     // Check all 4 diagonal directions
+//     const directions = [
+//       { dr: 1, dc: 1 }, // Down-right
+//       { dr: 1, dc: -1 }, // Down-left
+//       { dr: -1, dc: 1 }, // Up-right
+//       { dr: -1, dc: -1 }, // Up-left
+//     ];
+
+//     // Position we're evaluating for placement
+//     const positionColor = (row + col) % 2 === 0 ? "light" : "dark";
+//     const correctColor = state.playerColors[playerId] === positionColor;
+
+//     // If the square isn't on our color, it has no diagonal potential for us
+//     if (!correctColor) return 0;
+
+//     for (const direction of directions) {
+//       // Count how many of our pawns and empty spaces we have in this diagonal
+//       let myPawnsInLine = 0;
+//       let emptyValidSquares = 0;
+//       let maxConsecutive = 0;
+//       let currentConsecutive = 0;
+
+//       // Check 3 steps in each direction
+//       for (let step = -3; step <= 3; step++) {
+//         if (step === 0) continue; // Skip the position itself
+
+//         const r = row + direction.dr * step;
+//         const c = col + direction.dc * step;
+
+//         // Skip invalid positions
+//         if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) continue;
+
+//         const idx = r * BOARD_SIZE + c;
+//         const square = board[idx];
+
+//         // Check if this is a square of our color
+//         const squareColor = (r + c) % 2 === 0 ? "light" : "dark";
+//         const isCorrectColor = state.playerColors[playerId] === squareColor;
+
+//         if (!isCorrectColor) continue; // Skip squares not on our color
+
+//         if (square.pawn?.playerId === playerId) {
+//           myPawnsInLine++;
+//           currentConsecutive++;
+//           maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
+//         } else if (!square.pawn) {
+//           emptyValidSquares++;
+//           currentConsecutive = 0;
+//         } else {
+//           // Opponent's pawn
+//           currentConsecutive = 0;
+//         }
+//       }
+
+//       // Calculate the offensive potential of this diagonal
+//       let potential = 0;
+
+//       // Higher potential for diagonals where we already have pawns
+//       potential += myPawnsInLine * 3;
+
+//       // Even higher for consecutive pawns
+//       potential += maxConsecutive * 2;
+
+//       // Need enough empty spaces to complete a diagonal
+//       if (myPawnsInLine + emptyValidSquares >= 4) {
+//         potential += 5;
+//       }
+
+//       // Higher potential for diagonals that extend from the edges
+//       if (
+//         (row === 0 ||
+//           row === BOARD_SIZE - 1 ||
+//           col === 0 ||
+//           col === BOARD_SIZE - 1) &&
+//         myPawnsInLine > 0
+//       ) {
+//         potential += 7; // Bonus for edge-based diagonals
+//       }
+
+//       maxPotential = Math.max(maxPotential, potential);
+//     }
+
+//     return maxPotential;
+//   }
+
+//   // Evaluate a move's quality with advanced heuristics
+//   evaluateMove(state: GameState, fromIndex: number, toIndex: number): number {
+//     let score = 0;
+//     const playerId = state.currentPlayerId;
+//     const opponentId = playerId === 1 ? 2 : 1;
+
+//     // Calculate position on the board (row/col)
+//     const toRow = Math.floor(toIndex / 8);
+//     const toCol = toIndex % 8;
+
+//     // 1. Prefer moves that contribute to creating diagonals
+//     score += this.evaluateDiagonalPotential(state, toIndex, playerId);
+
+//     // 2. Prefer moves that block opponent's potential diagonals
+//     score += this.evaluateBlockingPotential(state, toIndex, opponentId);
+
+//     // 3. Prefer moves that create dead zones for the opponent
+//     const moveState = this.applyActionToState(structuredClone(state), {
+//       type: "move",
+//       fromIndex,
+//       toIndex,
+//     });
+
+//     if (moveState) {
+//       // Count new dead zones created for opponent
+//       const oldDeadZones = state.deadZoneSquares;
+//       const newDeadZones = moveState.deadZoneSquares;
+
+//       // Check if we've created new dead zones for the opponent
+//       let newDeadZonesCount = 0;
+//       newDeadZones.forEach((affectedPlayer, squareIdx) => {
+//         if (affectedPlayer === opponentId && !oldDeadZones.has(squareIdx)) {
+//           newDeadZonesCount++;
+//         }
+//       });
+
+//       score += newDeadZonesCount * 2; // Dead zones are valuable
+
+//       // 4. Avoid moves that put our pawn in a position where it could be blocked
+//       const opponentCouldBlock = this.couldBeBlocked(
+//         moveState,
+//         toIndex,
+//         playerId
+//       );
+//       if (opponentCouldBlock) {
+//         score -= 3;
+//       }
+//     }
+
+//     // 5. Slightly prefer central positions
+//     const distanceFromCenter = Math.abs(toRow - 3.5) + Math.abs(toCol - 3.5);
+//     score += (7 - distanceFromCenter) * 0.2;
+
+//     return score;
+//   }
+
+//   // Evaluate how much a position contributes to diagonal formations
+//   evaluateDiagonalPotential(
+//     state: GameState,
+//     position: number,
+//     playerId: PlayerId
+//   ): number {
+//     const board = state.board;
+//     const row = Math.floor(position / 8);
+//     const col = position % 8;
+//     let score = 0;
+
+//     // Check all 4 diagonal directions
+//     const directions = [
+//       { dr: 1, dc: 1 }, // Down-right
+//       { dr: 1, dc: -1 }, // Down-left
+//       { dr: -1, dc: 1 }, // Up-right
+//       { dr: -1, dc: -1 }, // Up-left
+//     ];
+
+//     for (const direction of directions) {
+//       // Look 3 steps in each direction
+//       for (let step = -3; step <= 3; step++) {
+//         if (step === 0) continue; // Skip the position itself
+
+//         const r = row + direction.dr * step;
+//         const c = col + direction.dc * step;
+
+//         // Check if the position is valid
+//         if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+//           const idx = r * 8 + c;
+//           const square = board[idx];
+
+//           if (
+//             square.pawn?.playerId === playerId &&
+//             square.boardColor === state.playerColors[playerId] &&
+//             !state.blockedPawnsInfo.has(idx) &&
+//             !state.blockingPawnsInfo.has(idx) &&
+//             !state.deadZoneCreatorPawnsInfo.has(idx)
+//           ) {
+//             // Distance factor - closer pawns are more valuable for diagonals
+//             const distance = Math.abs(step);
+//             if (distance <= 3) {
+//               score += 4 - distance; // Higher score for closer pawns
+//             }
+//           }
+//         }
+//       }
+//     }
+
+//     return score;
+//   }
+
+//   // Evaluate how much a position blocks opponent's diagonal potential
+//   evaluateBlockingPotential(
+//     state: GameState,
+//     position: number,
+//     opponentId: PlayerId
+//   ): number {
+//     // Similar to diagonal potential, but looking at opponent's pawns
+//     const board = state.board;
+//     const row = Math.floor(position / 8);
+//     const col = position % 8;
+//     let score = 0;
+
+//     // Check if this position could block a potential win
+//     const directions = [
+//       { dr: 1, dc: 1 },
+//       { dr: 1, dc: -1 },
+//       { dr: -1, dc: 1 },
+//       { dr: -1, dc: -1 },
+//     ];
+
+//     for (const direction of directions) {
+//       // Count opponent's pawns in this diagonal
+//       let opponentPawns = 0;
+//       let diagonalPositions = [];
+
+//       for (let step = -3; step <= 3; step++) {
+//         if (step === 0) continue;
+
+//         const r = row + direction.dr * step;
+//         const c = col + direction.dc * step;
+
+//         if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+//           const idx = r * 8 + c;
+//           const square = board[idx];
+//           diagonalPositions.push(idx);
+
+//           if (
+//             square.pawn?.playerId === opponentId &&
+//             square.boardColor === state.playerColors[opponentId] &&
+//             !state.blockedPawnsInfo.has(idx)
+//           ) {
+//             opponentPawns++;
+//           }
+//         }
+//       }
+
+//       // If opponent has 2+ pawns in this diagonal, it's worth blocking
+//       if (opponentPawns >= 2) {
+//         score += opponentPawns;
+//       }
+
+//       // Even more valuable if opponent is close to winning
+//       if (opponentPawns >= 3) {
+//         score += 5;
+//       }
+//     }
+
+//     return score;
+//   }
+
+//   // Check if a pawn at the given position could be blocked by opponent
+//   couldBeBlocked(
+//     state: GameState,
+//     position: number,
+//     playerId: PlayerId
+//   ): boolean {
+//     const board = state.board;
+//     const row = Math.floor(position / 8);
+//     const col = position % 8;
+//     const opponentId = playerId === 1 ? 2 : 1;
+
+//     // Check horizontally
+//     if (col > 0 && col < 7) {
+//       const leftIdx = row * 8 + (col - 1);
+//       const rightIdx = row * 8 + (col + 1);
+
+//       // If one side has opponent pawn and other side is empty but valid for opponent
+//       if (board[leftIdx].pawn?.playerId === opponentId) {
+//         // Check if right position is a valid move for opponent
+//         if (
+//           !board[rightIdx].pawn &&
+//           board[rightIdx].boardColor === state.playerColors[opponentId]
+//         ) {
+//           return true;
+//         }
+//       }
+
+//       if (board[rightIdx].pawn?.playerId === opponentId) {
+//         // Check if left position is a valid move for opponent
+//         if (
+//           !board[leftIdx].pawn &&
+//           board[leftIdx].boardColor === state.playerColors[opponentId]
+//         ) {
+//           return true;
+//         }
+//       }
+//     }
+
+//     // Check vertically
+//     if (row > 0 && row < 7) {
+//       const aboveIdx = (row - 1) * 8 + col;
+//       const belowIdx = (row + 1) * 8 + col;
+
+//       if (board[aboveIdx].pawn?.playerId === opponentId) {
+//         // Check if below position is a valid move for opponent
+//         if (
+//           !board[belowIdx].pawn &&
+//           board[belowIdx].boardColor === state.playerColors[opponentId]
+//         ) {
+//           return true;
+//         }
+//       }
+
+//       if (board[belowIdx].pawn?.playerId === opponentId) {
+//         // Check if above position is a valid move for opponent
+//         if (
+//           !board[aboveIdx].pawn &&
+//           board[aboveIdx].boardColor === state.playerColors[opponentId]
+//         ) {
+//           return true;
+//         }
+//       }
+//     }
+
+//     return false;
+//   }
+
+//   applyActionToState(state: GameState, action: Action): GameState | null {
+//     if (action.type === "place") {
+//       // Check both properties for placement actions
+//       const index =
+//         action.squareIndex !== undefined ? action.squareIndex : action.toIndex;
+//       if (index !== undefined) {
+//         return placePawn(state, index);
+//       }
+//     } else if (
+//       action.type === "move" &&
+//       action.fromIndex !== undefined &&
+//       action.toIndex !== undefined
+//     ) {
+//       return movePawn(state, action.fromIndex, action.toIndex);
+//     }
+//     return null;
+//   }
+
+//   // Improved selection using UCT with heuristic bias
+//   selectChild(explorationWeight: number): MCTSNode | null {
+//     let bestChild = null;
+//     let bestUcb1 = -Infinity;
+
+//     for (const child of this.children) {
+//       if (child.visits === 0) return child;
+
+//       // Calculate UCB1 with additional heuristic weighting
+//       const exploitation = child.wins / child.visits;
+//       const exploration =
+//         explorationWeight * Math.sqrt(Math.log(this.visits) / child.visits);
+
+//       // Add heuristic bias based on action quality if available
+//       let heuristicBias = 0;
+//       if (
+//         child.action &&
+//         "quality" in child.action &&
+//         typeof child.action.quality === "number"
+//       ) {
+//         heuristicBias = child.action.quality * 0.05; // Small weight to avoid overwhelming exploration/exploitation
+//       }
+
+//       const ucb1 = exploitation + exploration + heuristicBias;
+
+//       if (ucb1 > bestUcb1) {
+//         bestUcb1 = ucb1;
+//         bestChild = child;
+//       }
+//     }
+
+//     return bestChild;
+//   }
+
+//   // Improved rollout with heuristic move selection
+//   rollout(maxDepth: number): number {
+//     let currentState = structuredClone(this.state);
+//     let depth = 0;
+
+//     while (!this.isTerminal(currentState) && depth < maxDepth) {
+//       const actions = this.getValidActions(currentState);
+//       if (
+//         actions.length === 0 ||
+//         (actions.length === 1 && actions[0].type === "none")
+//       ) {
+//         break;
+//       }
+
+//       // Modified epsilon-greedy policy with strategic bias for early game
+//       let chosenAction: Action;
+
+//       // Placement phase: Be more deterministic about edge strategy
+//       if (currentState.gamePhase === "placement") {
+//         // 90% choose best action in placement phase
+//         if (Math.random() < 0.9) {
+//           chosenAction = actions[0]; // Best action (already sorted)
+//         } else {
+//           // 10% exploration, but still prefer higher quality moves
+//           // Choose from top 3 actions if available
+//           const topActions = actions.slice(0, Math.min(3, actions.length));
+//           chosenAction =
+//             topActions[Math.floor(Math.random() * topActions.length)];
+//         }
+//       }
+//       // Movement phase: More standard epsilon-greedy
+//       else {
+//         if (Math.random() < 0.8) {
+//           chosenAction = actions[0]; // Best action
+//         } else {
+//           chosenAction = actions[Math.floor(Math.random() * actions.length)];
+//         }
+//       }
+
+//       const nextState = this.applyActionToState(currentState, chosenAction);
+//       if (!nextState) break;
+
+//       currentState = nextState;
+//       depth++;
+//     }
+
+//     // Evaluate the final state
+//     return this.evaluateState(currentState, this.playerWhoseTurnItIs);
+//   }
+
+//   // Enhanced state evaluation for non-terminal states
+//   evaluateState(state: GameState, perspectivePlayerId: PlayerId): number {
+//     // If there's a winner, return win/loss
+//     if (state.winner === perspectivePlayerId) return 1.0;
+//     if (state.winner !== null && state.winner !== perspectivePlayerId)
+//       return 0.0;
+
+//     // For non-terminal states, evaluate position quality
+//     const opponentId = perspectivePlayerId === 1 ? 2 : 1;
+
+//     // Cache key based on board position and player perspective
+//     const cacheKey = this.getBoardSignature(state, perspectivePlayerId);
+//     if (this.boardEvaluationCache.has(cacheKey)) {
+//       return this.boardEvaluationCache.get(cacheKey)!;
+//     }
+
+//     // Count pawns, blocked pawns, and dead zones
+//     let myPawns = 0,
+//       opponentPawns = 0;
+//     let myBlockedPawns = 0,
+//       opponentBlockedPawns = 0;
+//     let myDeadZones = 0,
+//       opponentDeadZones = 0;
+
+//     // Count diagonal alignment potentials
+//     let myDiagonalPotential = 0,
+//       opponentDiagonalPotential = 0;
+
+//     for (let i = 0; i < state.board.length; i++) {
+//       const square = state.board[i];
+
+//       // Count pawns
+//       if (square.pawn) {
+//         if (square.pawn.playerId === perspectivePlayerId) {
+//           myPawns++;
+//           if (state.blockedPawnsInfo.has(i)) {
+//             myBlockedPawns++;
+//           }
+//         } else {
+//           opponentPawns++;
+//           if (state.blockedPawnsInfo.has(i)) {
+//             opponentBlockedPawns++;
+//           }
+//         }
+//       }
+//     }
+
+//     // Count dead zones
+//     state.deadZoneSquares.forEach((affectedPlayer, _) => {
+//       if (affectedPlayer === perspectivePlayerId) {
+//         myDeadZones++;
+//       } else {
+//         opponentDeadZones++;
+//       }
+//     });
+
+//     // Calculate diagonal potentials for both players
+//     for (let i = 0; i < state.board.length; i++) {
+//       const square = state.board[i];
+//       if (square.pawn?.playerId === perspectivePlayerId) {
+//         myDiagonalPotential += this.evaluateDiagonalPotential(
+//           state,
+//           i,
+//           perspectivePlayerId
+//         );
+//       } else if (square.pawn?.playerId === opponentId) {
+//         opponentDiagonalPotential += this.evaluateDiagonalPotential(
+//           state,
+//           i,
+//           opponentId
+//         );
+//       }
+//     }
+
+//     // Calculate final score as a value between 0 and 1
+//     let score = 0.5; // Start neutral
+
+//     // Adjust based on pawn advantage (small factor)
+//     score += 0.02 * (myPawns - opponentPawns);
+
+//     // Adjust based on blocked pawns (more significant)
+//     score += 0.05 * (opponentBlockedPawns - myBlockedPawns);
+
+//     // Adjust based on dead zones (important)
+//     score += 0.07 * (opponentDeadZones - myDeadZones);
+
+//     // Adjust based on diagonal potential (most important)
+//     score += 0.1 * (myDiagonalPotential - opponentDiagonalPotential);
+
+//     // Clamp between 0.1 and 0.9 (to avoid overconfidence)
+//     score = Math.max(0.1, Math.min(0.9, score));
+
+//     // Cache the evaluation
+//     this.boardEvaluationCache.set(cacheKey, score);
+
+//     return score;
+//   }
+
+//   // Create a unique signature for the board state for caching
+//   getBoardSignature(state: GameState, perspectivePlayer: PlayerId): string {
+//     let signature = "";
+
+//     for (let i = 0; i < state.board.length; i++) {
+//       const square = state.board[i];
+//       if (square.pawn) {
+//         signature += square.pawn.playerId.toString();
+//       } else {
+//         signature += "0";
+//       }
+//     }
+
+//     return `${signature}-p${perspectivePlayer}`;
+//   }
+
+//   isTerminal(state: GameState): boolean {
+//     return state.winner !== null;
+//   }
+
+//   getResult(terminalState: GameState, perspectivePlayerId: PlayerId): number {
+//     if (terminalState.winner === perspectivePlayerId) return 1;
+//     if (
+//       terminalState.winner !== null &&
+//       terminalState.winner !== perspectivePlayerId
+//     )
+//       return 0;
+//     return 0.5;
+//   }
+
+//   backpropagate(resultFromPerspectiveOfNodePlayer: number): void {
+//     let node: MCTSNode | null = this;
+//     while (node) {
+//       node.visits++;
+//       node.wins += resultFromPerspectiveOfNodePlayer;
+//       node = node.parent;
+//       resultFromPerspectiveOfNodePlayer = 1 - resultFromPerspectiveOfNodePlayer;
+//     }
+//   }
+
+//   expand(): MCTSNode | null {
+//     if (this.untriedActions.length === 0) return null;
+
+//     // Pop an action from the untried actions list
+//     const action = this.untriedActions.shift()!;
+
+//     // Apply the action to get a new state
+//     const nextState = this.applyActionToState(this.state, action);
+
+//     // If action is invalid, return null
+//     if (!nextState) return null;
+
+//     // Create a new child node
+//     const childNode = new MCTSNode(nextState, this, action);
+
+//     // Add the new node to children list
+//     this.children.push(childNode);
+
+//     return childNode;
+//   }
+// }
+
+// /**
+//  * Main MCTS algorithm
+//  */
+// export class MCTS {
+//   initialState: GameState;
+//   iterations: number;
+//   timeLimit: number;
+//   explorationWeight: number;
+//   maxRolloutDepth: number;
+
+//   constructor(initialState: GameState, difficulty: string, config: any) {
+//     this.initialState = structuredClone(initialState);
+
+//     // Set parameters based on difficulty
+//     this.iterations = config.iterations || 10000;
+//     this.timeLimit = 2000; // 2 seconds max
+//     this.explorationWeight = config.exploration || Math.sqrt(2);
+//     this.maxRolloutDepth = config.simulationDepth || 50;
+//   }
+
+//   /**
+//    * Find the best action using MCTS
+//    */
+//   findBestAction(): Action | null {
+//     const rootNode = new MCTSNode(this.initialState);
+
+//     // Immediate return if only one valid action
+//     if (rootNode.untriedActions.length === 0) return null;
+//     if (rootNode.untriedActions.length === 1) return rootNode.untriedActions[0];
+
+//     const startTime = Date.now();
+//     let iterations = 0;
+
+//     // Run MCTS iterations
+//     while (
+//       iterations < this.iterations &&
+//       Date.now() - startTime < this.timeLimit
+//     ) {
+//       // 1. Selection
+//       let node = rootNode;
+//       while (node.untriedActions.length === 0 && node.children.length > 0) {
+//         const selectedChild = node.selectChild(this.explorationWeight);
+//         if (!selectedChild) break;
+//         node = selectedChild;
+//       }
+
+//       // 2. Expansion
+//       if (node.untriedActions.length > 0 && !node.isTerminal(node.state)) {
+//         const expandedNode = node.expand();
+//         if (!expandedNode) continue; // Invalid action, try again
+//         node = expandedNode;
+//       }
+
+//       // 3. Simulation
+//       const result = node.rollout(this.maxRolloutDepth);
+
+//       // 4. Backpropagation
+//       node.backpropagate(result);
+
+//       iterations++;
+//     }
+
+//     // Find best child based on average score (not visit count)
+//     let bestChild = null;
+//     let bestScore = -Infinity;
+
+//     for (const child of rootNode.children) {
+//       // Use average score for final selection, not UCT
+//       const score = child.visits > 0 ? child.wins / child.visits : 0;
+
+//       if (score > bestScore) {
+//         bestScore = score;
+//         bestChild = child;
+//       }
+//     }
+
+//     // Return the action of the best child
+//     if (bestChild) {
+//       // Log info about the decision quality
+//       const winRate = ((bestChild.wins / bestChild.visits) * 100).toFixed(1);
+//       console.log(
+//         `Selected move: ${JSON.stringify(
+//           bestChild.action
+//         )} with win rate ${winRate}% after ${iterations} iterations`
+//       );
+//       return bestChild.action;
+//     }
+
+//     // Fallback to first action if no children
+//     return rootNode.untriedActions.length > 0
+//       ? rootNode.untriedActions[0]
+//       : null;
+//   }
+// }
+
+
+
+
+
+import type { GameState, PlayerId } from "../../lib/gameLogic";
+import {
+  placePawn,
+  movePawn,
+  isValidPlacement,
+  getValidMoveDestinations,
+  BOARD_SIZE,
+} from "../../lib/gameLogic";
 
 export interface Action {
-  type: 'place' | 'move' | 'none'; 
-  squareIndex?: number; 
-  fromIndex?: number; 
-  toIndex?: number;   
+  type: "place" | "move" | "none";
+  squareIndex?: number;
+  fromIndex?: number;
+  toIndex?: number;
+  quality?: number;
 }
 
 export class MCTSNode {
   state: GameState;
   parent: MCTSNode | null;
+  action: Action | null;
   children: MCTSNode[];
   visits: number;
   wins: number;
-  untriedActions: Action[];
-  actionThatLedToThisNode: Action | null;
   playerWhoseTurnItIs: PlayerId;
+  untriedActions: Action[];
+  boardEvaluationCache: Map<string, number>;
 
-  constructor(state: GameState, parent: MCTSNode | null = null, action: Action | null = null) {
-    this.state = structuredClone(state); // Always deep clone for safety
+  constructor(
+    state: GameState,
+    parent: MCTSNode | null = null,
+    action: Action | null = null
+  ) {
+    this.state = structuredClone(state);
     this.parent = parent;
-    this.actionThatLedToThisNode = action;
+    this.action = action;
     this.children = [];
     this.visits = 0;
     this.wins = 0;
     this.playerWhoseTurnItIs = this.state.currentPlayerId;
     this.untriedActions = this.getValidActions(this.state);
+    this.boardEvaluationCache = new Map<string, number>();
   }
 
+  // Get valid actions, sorted by heuristic quality
   getValidActions(currentState: GameState): Action[] {
     const actions: Action[] = [];
-    // PlayerId is implicitly currentState.currentPlayerId for these checks
-    if (currentState.gamePhase === 'placement') {
-      for (let i = 0; i < currentState.board.length; i++) {
-        if (checkIsValidPlacement(i, currentState)) { // Pass full gameState
-          actions.push({ type: 'place', squareIndex: i });
+    const playerId = currentState.currentPlayerId;
+
+    if (currentState.gamePhase === "placement") {
+      // For placement phase
+      const placementCandidates: Action[] = [];
+      const opponentId = playerId === 1 ? 2 : 1;
+      
+      // Count placed pawns to adjust strategy based on game progress
+      const myPlacedPawns = currentState.placedPawns[playerId];
+      const opponentPlacedPawns = currentState.placedPawns[opponentId];
+
+      // Get all valid placement options first
+      for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+        if (isValidPlacement(i, playerId, currentState)) {
+          const row = Math.floor(i / BOARD_SIZE);
+          const col = i % BOARD_SIZE;
+
+          // Calculate if this is an edge or corner position
+          const isEdgeRow = row === 0 || row === BOARD_SIZE - 1;
+          const isEdgeCol = col === 0 || col === BOARD_SIZE - 1;
+          const isCorner = isEdgeRow && isEdgeCol;
+          const isEdge = isEdgeRow || isEdgeCol;
+
+          // Start with base placement score
+          let placementQuality = 0;
+          
+          // CRITICAL: First priority - Block opponent diagonal formations
+          const blockingValue = this.evaluateBlockingDiagonalInPlacement(
+            currentState,
+            i,
+            opponentId
+          );
+          
+          // HIGH PRIORITY: Block opponent diagonal formations
+          // Even higher priority when opponent has 2+ pawns in a diagonal
+          if (blockingValue > 0) {
+            // Much higher weight for blocking potential winning diagonals
+            placementQuality += blockingValue * 30;
+          }
+          
+          // NEW: Early game edge strategy - first few moves focus heavily on edges
+          if (myPlacedPawns < 3) {
+            if (isCorner) {
+              placementQuality += 25; // Highest priority for corners
+            } else if (isEdge) {
+              placementQuality += 20; // High priority for edges
+            }
+          }
+          
+          // NEW: Evaluate offensive diagonal potential from this position
+          const offensiveDiagonalValue = this.evaluateOffensiveDiagonalPotential(
+            currentState,
+            i,
+            playerId
+          );
+          placementQuality += offensiveDiagonalValue * 10; // Substantial weight
+          
+          // If we're the second player, need stronger blocking
+          if (playerId === 2) {
+            // Increased compensation for second player disadvantage
+            placementQuality += blockingValue * 15; // Even more blocking bias
+            
+            // For the second player's first move, prioritize blocking over edges
+            if (myPlacedPawns === 0 && opponentPlacedPawns === 1) {
+              // Look where first player placed and strategically respond
+              placementQuality += this.evaluateCounterFirstMove(currentState, i) * 20;
+            }
+          }
+
+          placementCandidates.push({
+            type: "place",
+            squareIndex: i,
+            toIndex: i,
+            quality: placementQuality,
+          });
         }
       }
-    } else { 
-      for (let fromIdx = 0; fromIdx < currentState.board.length; fromIdx++) {
-        const square = currentState.board[fromIdx];
-        if (square.pawn?.playerId === currentState.currentPlayerId && !currentState.blockedPawnsInfo.has(fromIdx)) {
-          const validDestinations = getValidMovesLogic(fromIdx, currentState); // Pass full gameState
+
+      // Sort placements by quality (highest first)
+      placementCandidates.sort((a, b) => (b.quality || 0) - (a.quality || 0));
+      actions.push(...placementCandidates);
+    } else {
+      // Movement phase - with improved priorities
+      const potentialWinningMoves: Action[] = [];
+      const criticalBlockingMoves: Action[] = []; // For opponent about to win
+      const blockingMoves: Action[] = []; // For regular blocking moves
+      const normalMoves: Action[] = [];
+
+      // Loop through our pawns
+      for (let fromIdx = 0; fromIdx < BOARD_SIZE * BOARD_SIZE; fromIdx++) {
+        const fromSquare = currentState.board[fromIdx];
+
+        if (
+          fromSquare?.pawn?.playerId === playerId &&
+          !currentState.blockedPawnsInfo.has(fromIdx)
+        ) {
+          const validDestinations = getValidMoveDestinations(
+            fromIdx,
+            playerId,
+            currentState
+          );
+
           for (const toIdx of validDestinations) {
-            actions.push({ type: 'move', fromIndex: fromIdx, toIndex: toIdx });
+            // Try the move and see if it leads to a win
+            const moveAction = {
+              type: "move" as const,
+              fromIndex: fromIdx,
+              toIndex: toIdx,
+            };
+
+            const resultState = this.applyActionToState(
+              structuredClone(currentState),
+              moveAction
+            );
+
+            if (resultState && resultState.winner === playerId) {
+              // This is a winning move! Prioritize it highly
+              potentialWinningMoves.push(moveAction);
+            } else {
+              // Check if opponent has a potential win we need to block
+              const criticalBlockValue = this.evaluateCriticalBlock(
+                currentState,
+                toIdx
+              );
+              
+              // Regular blocking value
+              const blockingValue = this.evaluateBlockingWinningDiagonal(
+                currentState,
+                toIdx
+              );
+
+              if (criticalBlockValue >= 40) {
+                // CRITICAL priority - opponent about to win
+                criticalBlockingMoves.push({
+                  ...moveAction,
+                  quality: criticalBlockValue,
+                });
+              } 
+              else if (blockingValue >= 15) {
+                // High blocking value - this is an important block
+                blockingMoves.push({
+                  ...moveAction,
+                  quality: blockingValue,
+                });
+              } else {
+                // Regular move - evaluate with standard heuristics
+                const quality = this.evaluateMove(currentState, fromIdx, toIdx);
+                normalMoves.push({
+                  ...moveAction,
+                  quality,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Sort all move categories by quality
+      criticalBlockingMoves.sort((a, b) => (b.quality || 0) - (a.quality || 0));
+      blockingMoves.sort((a, b) => (b.quality || 0) - (a.quality || 0));
+      normalMoves.sort((a, b) => (b.quality || 0) - (a.quality || 0));
+
+      // Priority order: winning moves, critical blocks, regular blocks, then normal moves
+      actions.push(
+        ...potentialWinningMoves, 
+        ...criticalBlockingMoves, 
+        ...blockingMoves, 
+        ...normalMoves
+      );
+    }
+
+    return actions.length > 0 ? actions : [{ type: "none" }];
+  }
+
+  // Enhanced method to evaluate offensive diagonal potential
+  evaluateOffensiveDiagonalPotential(
+    state: GameState,
+    position: number,
+    playerId: PlayerId
+  ): number {
+    const board = state.board;
+    const row = Math.floor(position / BOARD_SIZE);
+    const col = position % BOARD_SIZE;
+    
+    // Check if this position is on our color
+    const positionSquare = board[position];
+    if (positionSquare.boardColor !== state.playerColors[playerId]) {
+      return 0; // Can't build diagonal if not on our color
+    }
+    
+    let maxPotential = 0;
+    
+    // Check all 4 diagonal directions
+    const directions = [
+      { dr: 1, dc: 1 },   // Down-right
+      { dr: 1, dc: -1 },  // Down-left
+      { dr: -1, dc: 1 },  // Up-right
+      { dr: -1, dc: -1 }, // Up-left
+    ];
+    
+    for (const direction of directions) {
+      // Count pawns and eligible empty spaces in this diagonal
+      let myPawnsInLine = 0;
+      let emptyValidSquares = 0;
+      let maxConsecutive = 0;
+      let currentConsecutive = 0;
+      let edgeBased = false;
+      
+      // Look in both directions along this diagonal up to 3 steps
+      for (let step = -3; step <= 3; step++) {
+        if (step === 0) continue; // Skip current position
+        
+        const r = row + direction.dr * step;
+        const c = col + direction.dc * step;
+        
+        // Skip invalid positions
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) continue;
+        
+        const idx = r * BOARD_SIZE + c;
+        const square = board[idx];
+        
+        // Only consider squares of our color for diagonal
+        if (square.boardColor !== state.playerColors[playerId]) continue;
+        
+        // Check if this position is on an edge
+        if (r === 0 || r === BOARD_SIZE - 1 || c === 0 || c === BOARD_SIZE - 1) {
+          edgeBased = true;
+        }
+        
+        if (square.pawn?.playerId === playerId) {
+          myPawnsInLine++;
+          currentConsecutive++;
+          maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
+        } else if (!square.pawn && !(state.deadZoneSquares.get(idx) === playerId)) {
+          emptyValidSquares++;
+          currentConsecutive = 0;
+        } else {
+          // Opponent's pawn or our deadzone
+          currentConsecutive = 0;
+        }
+      }
+      
+      // Calculate potential for this diagonal
+      let potential = 0;
+      
+      // Base potential based on our pawns and consecutive pawns
+      potential += myPawnsInLine * 3;
+      potential += maxConsecutive * 2;
+      
+      // Bonus for having enough spaces to complete a diagonal
+      if (myPawnsInLine + emptyValidSquares + 1 >= 4) {
+        potential += 5;
+        
+        // Extra potential if we already have 2+ pawns in place
+        if (myPawnsInLine >= 2) {
+          potential += 10;
+        }
+      }
+      
+      // SIGNIFICANTLY higher potential for edge-based diagonals
+      if (edgeBased) {
+        potential *= 1.5; // 50% boost for edge-based diagonals
+      }
+      
+      // Factor in if this position forms a "winning diagonal" with existing pawns
+      if (myPawnsInLine >= 2 && this.wouldCompleteDiagonal(state, position, direction, playerId)) {
+        potential += 30; // Huge boost for forming winning patterns
+      }
+      
+      maxPotential = Math.max(maxPotential, potential);
+    }
+    
+    return maxPotential;
+  }
+
+  // Helper method to check if a position would complete a winning diagonal
+  wouldCompleteDiagonal(
+    state: GameState, 
+    position: number, 
+    direction: { dr: number; dc: number }, 
+    playerId: PlayerId
+  ): boolean {
+    const board = state.board;
+    const row = Math.floor(position / BOARD_SIZE);
+    const col = position % BOARD_SIZE;
+    
+    // Need to find 3 of our pawns in this direction that could form a 4-in-row with this position
+    const positions: number[] = [position]; // Start with this position
+    
+    // Look 3 steps forward and backward in this direction
+    for (let step = -3; step <= 3; step++) {
+      if (step === 0) continue; // Skip current position
+      
+      const r = row + direction.dr * step;
+      const c = col + direction.dc * step;
+      
+      // Skip invalid positions
+      if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) continue;
+      
+      const idx = r * BOARD_SIZE + c;
+      const square = board[idx];
+      
+      // Only add our pawns on our color
+      if (square.pawn?.playerId === playerId && 
+          square.boardColor === state.playerColors[playerId] &&
+          !state.blockedPawnsInfo.has(idx)) {
+        positions.push(idx);
+      }
+    }
+    
+    // Check if there's a set of 4 contiguous positions that could form a diagonal
+    if (positions.length >= 4) {
+      // Sort by position index (this will work for diagonals too since they increase/decrease uniformly)
+      positions.sort((a, b) => a - b);
+      
+      // Check for 4 contiguous positions
+      for (let i = 0; i <= positions.length - 4; i++) {
+        const p1 = positions[i];
+        const p2 = positions[i + 1];
+        const p3 = positions[i + 2];
+        const p4 = positions[i + 3];
+        
+        // TODO: Validate that these are actually in a diagonal pattern
+        // For now, a rough check - could be improved
+        if (p4 - p3 === p3 - p2 && p3 - p2 === p2 - p1) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  // Enhanced method for better diagonal blocking
+  evaluateBlockingDiagonalInPlacement(
+    state: GameState,
+    position: number,
+    opponentId: PlayerId
+  ): number {
+    const board = state.board;
+    const row = Math.floor(position / BOARD_SIZE);
+    const col = position % BOARD_SIZE;
+    let maxBlockingValue = 0;
+    
+    // Get opponent's color
+    const opponentColor = state.playerColors[opponentId];
+    
+    // Check all 4 diagonal directions
+    const directions = [
+      { dr: 1, dc: 1 },   // Down-right
+      { dr: 1, dc: -1 },  // Down-left
+      { dr: -1, dc: 1 },  // Up-right
+      { dr: -1, dc: -1 }, // Up-left
+    ];
+    
+    for (const direction of directions) {
+      // Look in both directions (forward and backward along diagonal)
+      let opponentPawnsInLine = 0;
+      let emptyValidSquares = 0;
+      let opponentPawnPositions: number[] = [];
+      
+      // Check 3 steps in each direction along the diagonal
+      for (let step = -3; step <= 3; step++) {
+        if (step === 0) continue; // Skip the position itself
+        
+        const r = row + direction.dr * step;
+        const c = col + direction.dc * step;
+        
+        // Skip invalid positions
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) continue;
+        
+        const idx = r * BOARD_SIZE + c;
+        const square = board[idx];
+        
+        // Only consider squares of opponent's color for their diagonal
+        if (square.boardColor !== opponentColor) continue;
+        
+        // Count opponent pawns in this diagonal
+        if (square.pawn?.playerId === opponentId &&
+            !state.blockedPawnsInfo.has(idx)) {
+          opponentPawnsInLine++;
+          opponentPawnPositions.push(idx);
+        }
+        // Count empty spots that could form a diagonal
+        else if (!square.pawn && !(state.deadZoneSquares.get(idx) === opponentId)) {
+          emptyValidSquares++;
+        }
+      }
+      
+      // Calculate blocking value - more aggressive blocking
+      let blockingValue = 0;
+      
+      // Critical blocking: Even a single opponent pawn on their color should be considered
+      if (opponentPawnsInLine >= 1) {
+        // Base value proportional to opponent pawns
+        blockingValue = 8 * opponentPawnsInLine;
+        
+        // VERY high value for blocking 2+ pawns
+        if (opponentPawnsInLine >= 2) {
+          blockingValue = 20 * opponentPawnsInLine;
+        }
+        
+        // CRITICAL priority if they also have empty spots to complete a 4-in-a-row
+        if (opponentPawnsInLine + emptyValidSquares >= 4) {
+          blockingValue += 25;
+        }
+        
+        // Check for consecutive pawns - much more dangerous
+        if (this.hasPotentialDiagonal(state, opponentPawnPositions, opponentId)) {
+          blockingValue *= 2; // Double the blocking value for consecutive or nearly consecutive pawns
+        }
+      }
+      
+      // Keep track of highest blocking value across all diagonals
+      maxBlockingValue = Math.max(maxBlockingValue, blockingValue);
+    }
+    
+    return maxBlockingValue;
+  }
+
+  // Improved helper method to check if opponent pawns form a potential diagonal
+  hasPotentialDiagonal(
+    state: GameState, 
+    positions: number[], 
+    opponentId: PlayerId
+  ): boolean {
+    if (positions.length < 2) return false;
+    
+    // First, get the opponent's color
+    const opponentColor = state.playerColors[opponentId];
+    
+    // Sort positions
+    positions.sort((a, b) => a - b);
+    
+    // Check for consecutive or near-consecutive positions along diagonals
+    for (let i = 0; i < positions.length - 1; i++) {
+      const p1 = positions[i];
+      const p2 = positions[i + 1];
+      
+      const row1 = Math.floor(p1 / BOARD_SIZE);
+      const col1 = p1 % BOARD_SIZE;
+      const row2 = Math.floor(p2 / BOARD_SIZE);
+      const col2 = p2 % BOARD_SIZE;
+      
+      // Check if they're in a diagonal pattern
+      if (Math.abs(row2 - row1) === Math.abs(col2 - col1)) {
+        // Calculate the diagonal direction
+        const dr = Math.sign(row2 - row1);
+        const dc = Math.sign(col2 - col1);
+        
+        // Check if there's a potential to extend this diagonal
+        const distance = Math.abs(row2 - row1); // Same as Math.abs(col2 - col1)
+        
+        // If pawns are adjacent or have a small gap
+        if (distance <= 2) {
+          // Look for empty spots that could complete the diagonal
+          let emptySpacesBetween = 0;
+          let extendableSpaces = 0;
+          
+          // Check spaces between the two pawns if they're not adjacent
+          if (distance === 2) {
+            const middleRow = row1 + dr;
+            const middleCol = col1 + dc;
+            const middleIdx = middleRow * BOARD_SIZE + middleCol;
+            
+            // If the space between is empty and on opponent's color, it's dangerous
+            if (!state.board[middleIdx].pawn && 
+                state.board[middleIdx].boardColor === opponentColor &&
+                !(state.deadZoneSquares.get(middleIdx) === opponentId)) {
+              emptySpacesBetween++;
+            }
+          }
+          
+          // Check for extendable spaces beyond these two pawns
+          // Forward direction
+          let checkRow = row2 + dr;
+          let checkCol = col2 + dc;
+          while (checkRow >= 0 && checkRow < BOARD_SIZE && 
+                checkCol >= 0 && checkCol < BOARD_SIZE) {
+            const checkIdx = checkRow * BOARD_SIZE + checkCol;
+            const square = state.board[checkIdx];
+            
+            if (square.pawn?.playerId === opponentId) {
+              // Another opponent pawn - this is very threatening
+              return true;
+            } else if (!square.pawn && 
+                      square.boardColor === opponentColor &&
+                      !(state.deadZoneSquares.get(checkIdx) === opponentId)) {
+              // Empty spot where they could extend
+              extendableSpaces++;
+            } else {
+              // Blocked by our pawn or not on their color
+              break;
+            }
+            
+            checkRow += dr;
+            checkCol += dc;
+          }
+          
+          // Backward direction
+          checkRow = row1 - dr;
+          checkCol = col1 - dc;
+          while (checkRow >= 0 && checkRow < BOARD_SIZE && 
+                checkCol >= 0 && checkCol < BOARD_SIZE) {
+            const checkIdx = checkRow * BOARD_SIZE + checkCol;
+            const square = state.board[checkIdx];
+            
+            if (square.pawn?.playerId === opponentId) {
+              // Another opponent pawn - this is very threatening
+              return true;
+            } else if (!square.pawn && 
+                      square.boardColor === opponentColor &&
+                      !(state.deadZoneSquares.get(checkIdx) === opponentId)) {
+              // Empty spot where they could extend
+              extendableSpaces++;
+            } else {
+              // Blocked by our pawn or not on their color
+              break;
+            }
+            
+            checkRow -= dr;
+            checkCol -= dc;
+          }
+          
+          // If they have empty spaces to extend and form a diagonal, it's dangerous
+          if (emptySpacesBetween + extendableSpaces >= 2) {
+            return true;
           }
         }
       }
     }
-    return actions.length > 0 ? actions : [{type: 'none'}];
+    
+    return false;
   }
 
-  applyActionToState(currentState: GameState, action: Action): GameState | null {
-    // applyPlacePawnLogic and applyMovePawnLogic from gameLogic.ts already handle
-    // deep cloning and all derived state updates (blocking, dead zones, winner).
-    if (action.type === 'place' && action.squareIndex !== undefined) {
-      return applyPlacePawnLogic(currentState, action.squareIndex);
-    } else if (action.type === 'move' && action.fromIndex !== undefined && action.toIndex !== undefined) {
-      return applyMovePawnLogic(currentState, action.fromIndex, action.toIndex);
-    } else if (action.type === 'none') {
-      // If 'none' action, switch player but don't change board. Recalculate derived state in case.
-      // This scenario should be rare if getValidActions works correctly.
-      let tempState = structuredClone(currentState);
-      tempState.currentPlayerId = tempState.currentPlayerId === 1 ? 2 : 1;
-      // applyPlacePawn/Move normally handle these; doing a simplified update for 'none'
-      const { blockedPawns, blockingPawns } = updateBlockingStatus(tempState.board);
-      const { deadZones, deadZoneCreatorPawnsInfo } = updateDeadZones(tempState.board, tempState.playerColors); // Corrected name
-      const {winner, winningLine} = checkWinCondition(tempState);
+  // New method to counter the first player's opening move strategically
+  evaluateCounterFirstMove(
+    state: GameState, 
+    position: number
+  ): number {
+    // Find where the first player placed their first pawn
+    const opponentId = state.currentPlayerId === 1 ? 2 : 1;
+    let firstOpponentPawnIndex = -1;
+    
+    for (let i = 0; i < state.board.length; i++) {
+      if (state.board[i].pawn?.playerId === opponentId) {
+        firstOpponentPawnIndex = i;
+        break;
+      }
+    }
+    
+    if (firstOpponentPawnIndex === -1) return 0;
+    
+    const opRow = Math.floor(firstOpponentPawnIndex / BOARD_SIZE);
+    const opCol = firstOpponentPawnIndex % BOARD_SIZE;
+    const myRow = Math.floor(position / BOARD_SIZE);
+    const myCol = position % BOARD_SIZE;
+    
+    // If opponent placed on a corner or edge, we should place on the opposite side
+    // to prevent them from forming a diagonal from that edge
+    const opIsCorner = (opRow === 0 || opRow === BOARD_SIZE - 1) && 
+                      (opCol === 0 || opCol === BOARD_SIZE - 1);
+    const opIsEdge = opRow === 0 || opRow === BOARD_SIZE - 1 || 
+                    opCol === 0 || opCol === BOARD_SIZE - 1;
+    
+    if (opIsCorner) {
+      // For corner placement, high value for the opposite diagonal area
+      // For example, if opponent placed at top-left, we want bottom-right area
+      const isGoodCounter = 
+        (opRow === 0 && opCol === 0 && myRow >= 3 && myCol >= 3) ||
+        (opRow === 0 && opCol === BOARD_SIZE - 1 && myRow >= 3 && myCol <= 4) ||
+        (opRow === BOARD_SIZE - 1 && opCol === 0 && myRow <= 4 && myCol >= 3) ||
+        (opRow === BOARD_SIZE - 1 && opCol === BOARD_SIZE - 1 && myRow <= 4 && myCol <= 4);
       
-      return {
-        ...tempState,
-        blockedPawnsInfo: blockedPawns,
-        blockingPawnsInfo: blockingPawns,
-        deadZoneSquares: deadZones,
-        deadZoneCreatorPawnsInfo: deadZoneCreatorPawnsInfo, // Corrected name
-        winner,
-        winningLine
-      };
+      return isGoodCounter ? 15 : 0;
+    } 
+    else if (opIsEdge) {
+      // For edge placement, good to place on opposite side
+      const isOppositeEdge = 
+        (opRow === 0 && myRow === BOARD_SIZE - 1) ||
+        (opRow === BOARD_SIZE - 1 && myRow === 0) ||
+        (opCol === 0 && myCol === BOARD_SIZE - 1) ||
+        (opCol === BOARD_SIZE - 1 && myCol === 0);
+      
+      return isOppositeEdge ? 10 : 0;
+    }
+    
+    // For center placements, we should try to control edges
+    const isCenterResponse = myRow === 0 || myRow === BOARD_SIZE - 1 || 
+                           myCol === 0 || myCol === BOARD_SIZE - 1;
+    
+    return isCenterResponse ? 8 : 0;
+  }
+
+  // New method to evaluate blocking of nearly-complete opponent diagonals
+  evaluateBlockingWinningDiagonal(
+    state: GameState,
+    position: number
+  ): number {
+    const opponentId = state.currentPlayerId === 1 ? 2 : 1;
+    const board = state.board;
+    const row = Math.floor(position / BOARD_SIZE);
+    const col = position % BOARD_SIZE;
+    let maxBlockingValue = 0;
+    
+    // Check all 4 diagonal directions
+    const directions = [
+      { dr: 1, dc: 1 },   // Down-right
+      { dr: 1, dc: -1 },  // Down-left
+      { dr: -1, dc: 1 },  // Up-right
+      { dr: -1, dc: -1 }, // Up-left
+    ];
+    
+    for (const direction of directions) {
+      // For each direction, we'll check both sides of the diagonal
+      let opponentPawnsInDiagonal = 0;
+      let diagonalPositions: number[] = [];
+      
+      // Check the diagonal (3 steps in each direction)
+      for (let offset = -3; offset <= 3; offset++) {
+        if (offset === 0) continue; // Skip our own position
+        
+        const r = row + direction.dr * offset;
+        const c = col + direction.dc * offset;
+        
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) continue;
+        
+        const idx = r * BOARD_SIZE + c;
+        const square = board[idx];
+        diagonalPositions.push(idx);
+        
+        // Count opponent pawns in the diagonal
+        if (square.pawn?.playerId === opponentId &&
+            square.boardColor === state.playerColors[opponentId] &&
+            !state.blockedPawnsInfo.has(idx)) {
+          opponentPawnsInDiagonal++;
+        }
+      }
+      
+      // Calculate blocking value based on number of opponent pawns
+      let blockingValue = 0;
+      
+      if (opponentPawnsInDiagonal >= 3) {
+        // Critical! Opponent has 3 in a diagonal - must block
+        blockingValue = 50;
+      } else if (opponentPawnsInDiagonal === 2) {
+        // Important to block 2 in a diagonal
+        blockingValue = 20;
+        
+        // Even more important if those 2 are close to each other
+        // TODO: Add logic to check if the 2 pawns are adjacent or close
+      }
+      
+      maxBlockingValue = Math.max(maxBlockingValue, blockingValue);
+    }
+    
+    return maxBlockingValue;
+  }
+
+  // New method to detect if opponent is about to win
+  evaluateCriticalBlock(
+    state: GameState, 
+    position: number
+  ): number {
+    const opponentId = state.currentPlayerId === 1 ? 2 : 1;
+    const board = state.board;
+    const row = Math.floor(position / BOARD_SIZE);
+    const col = position % BOARD_SIZE;
+    
+    // Check all 4 diagonal directions
+    const directions = [
+      { dr: 1, dc: 1 },   // Down-right
+      { dr: 1, dc: -1 },  // Down-left
+      { dr: -1, dc: 1 },  // Up-right
+      { dr: -1, dc: -1 }, // Up-left
+    ];
+    
+    for (const direction of directions) {
+      // Count opponent pawns in this diagonal
+      let opponentPawnsInDiagonal = 0;
+      let opponentPositions: {index: number; offset: number}[] = [];
+      
+      // Check up to 4 positions in each direction
+      for (let offset = -3; offset <= 3; offset++) {
+        if (offset === 0) continue; // Skip our position
+        
+        const r = row + direction.dr * offset;
+        const c = col + direction.dc * offset;
+        
+        if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) continue;
+        
+        const idx = r * BOARD_SIZE + c;
+        const square = board[idx];
+        
+        // Only consider opponent pawns on their color that aren't blocked
+        if (square.pawn?.playerId === opponentId &&
+            square.boardColor === state.playerColors[opponentId] &&
+            !state.blockedPawnsInfo.has(idx)) {
+          opponentPawnsInDiagonal++;
+          opponentPositions.push({index: idx, offset});
+        }
+      }
+      
+      // If opponent has 3 pawns in this diagonal, this is CRITICAL to block
+      if (opponentPawnsInDiagonal >= 3) {
+        // Check if these 3 pawns can form a winning diagonal with an empty space
+        if (this.canFormWinningDiagonal(opponentPositions, direction)) {
+          return 100; // Absolute highest priority - must block this
+        }
+        return 50; // Still very high priority
+      }
+    }
+    
+    return 0;
+  }
+
+// Helper to check if pawns can form a winning diagonal
+canFormWinningDiagonal(
+  positions: {index: number; offset: number}[], 
+  direction: { dr: number; dc: number }
+): boolean {
+  // Sort positions by offset to check for consecutive positions
+  positions.sort((a, b) => a.offset - b.offset);
+  
+  // Check for 3 consecutive or near-consecutive positions
+  if (positions.length >= 3) {
+    for (let i = 0; i <= positions.length - 3; i++) {
+      const p1 = positions[i];
+      const p2 = positions[i + 1];
+      const p3 = positions[i + 2];
+      
+      // Check if these are in a relatively straight diagonal line
+      // with at most one gap
+      if (Math.abs((p2.offset - p1.offset) - (p3.offset - p2.offset)) <= 1) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+
+
+  // Evaluate how much a position blocks opponent's diagonal potential
+  evaluateBlockingPotential(
+    state: GameState,
+    position: number,
+    opponentId: PlayerId
+  ): number {
+    // Similar to diagonal potential, but looking at opponent's pawns
+    const board = state.board;
+    const row = Math.floor(position / 8);
+    const col = position % 8;
+    let score = 0;
+
+    // Check if this position could block a potential win
+    const directions = [
+      { dr: 1, dc: 1 },
+      { dr: 1, dc: -1 },
+      { dr: -1, dc: 1 },
+      { dr: -1, dc: -1 },
+    ];
+
+    for (const direction of directions) {
+      // Count opponent's pawns in this diagonal
+      let opponentPawns = 0;
+      let diagonalPositions = [];
+
+      for (let step = -3; step <= 3; step++) {
+        if (step === 0) continue;
+
+        const r = row + direction.dr * step;
+        const c = col + direction.dc * step;
+
+        if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+          const idx = r * 8 + c;
+          const square = board[idx];
+          diagonalPositions.push(idx);
+
+          if (
+            square.pawn?.playerId === opponentId &&
+            square.boardColor === state.playerColors[opponentId] &&
+            !state.blockedPawnsInfo.has(idx)
+          ) {
+            opponentPawns++;
+          }
+        }
+      }
+
+      // If opponent has 2+ pawns in this diagonal, it's worth blocking
+      if (opponentPawns >= 2) {
+        score += opponentPawns;
+      }
+
+      // Even more valuable if opponent is close to winning
+      if (opponentPawns >= 3) {
+        score += 5;
+      }
+    }
+
+    return score;
+  }
+
+// Evaluate a move's quality with advanced heuristics
+evaluateMove(state: GameState, fromIndex: number, toIndex: number): number {
+  let score = 0;
+  const playerId = state.currentPlayerId;
+  const opponentId = playerId === 1 ? 2 : 1;
+
+  // Calculate board position
+  const toRow = Math.floor(toIndex / BOARD_SIZE);
+  const toCol = toIndex % BOARD_SIZE;
+
+  // 1. Evaluate diagonal formation potential
+  score += this.evaluateDiagonalPotential(state, toIndex, playerId);
+
+  // 2. Evaluate blocking opponent's diagonals
+  score += this.evaluateBlockingPotential(state, toIndex, opponentId);
+
+  // 3. Check for dead zone creation
+  const moveState = this.applyActionToState(structuredClone(state), {
+    type: "move",
+    fromIndex,
+    toIndex,
+  });
+
+  if (moveState) {
+    // Count new dead zones created for opponent
+    let newDeadZonesCount = 0;
+
+    moveState.deadZoneSquares.forEach((affectedPlayer, squareIdx) => {
+      const wasAlreadyDeadZone =
+        state.deadZoneSquares.has(squareIdx) &&
+        state.deadZoneSquares.get(squareIdx) === affectedPlayer;
+
+      if (affectedPlayer === opponentId && !wasAlreadyDeadZone) {
+        newDeadZonesCount++;
+      }
+    });
+
+    score += newDeadZonesCount * 3; // Dead zones are very valuable
+
+    // 4. Avoid moves that could get our pawn blocked
+    if (this.couldBeBlocked(moveState, toIndex, playerId)) {
+      score -= 2;
+    }
+
+    // 5. Prefer moves that block opponent pawns
+    const oldBlockedCount = Array.from(state.blockedPawnsInfo).filter(
+      (idx) => state.board[idx]?.pawn?.playerId === opponentId
+    ).length;
+
+    const newBlockedCount = Array.from(moveState.blockedPawnsInfo).filter(
+      (idx) => moveState.board[idx]?.pawn?.playerId === opponentId
+    ).length;
+
+    score += (newBlockedCount - oldBlockedCount) * 2.5;
+  }
+
+  // 6. Slightly prefer center positions over edges
+  const distanceFromCenter = Math.abs(toRow - 3.5) + Math.abs(toCol - 3.5);
+  score += (7 - distanceFromCenter) * 0.2;
+
+  return score;
+}
+
+// Check if a pawn could be blocked by opponent in next move
+couldBeBlocked(
+  state: GameState,
+  position: number,
+  playerId: PlayerId
+): boolean {
+  const board = state.board;
+  const row = Math.floor(position / BOARD_SIZE);
+  const col = position % BOARD_SIZE;
+  const opponentId = playerId === 1 ? 2 : 1;
+
+  // Check horizontal blocking potential (needs opponent pawns left+right)
+  if (col > 0 && col < BOARD_SIZE - 1) {
+    const leftIdx = row * BOARD_SIZE + (col - 1);
+    const rightIdx = row * BOARD_SIZE + (col + 1);
+
+    // If one side has opponent pawn and other side is valid for opponent
+    if (board[leftIdx].pawn?.playerId === opponentId) {
+      if (
+        !board[rightIdx].pawn &&
+        board[rightIdx].boardColor === state.playerColors[opponentId] &&
+        !(state.deadZoneSquares.get(rightIdx) === opponentId)
+      ) {
+        return true;
+      }
+    }
+
+    if (board[rightIdx].pawn?.playerId === opponentId) {
+      if (
+        !board[leftIdx].pawn &&
+        board[leftIdx].boardColor === state.playerColors[opponentId] &&
+        !(state.deadZoneSquares.get(leftIdx) === opponentId)
+      ) {
+        return true;
+      }
+    }
+  }
+
+  // Check vertical blocking potential (needs opponent pawns above+below)
+  if (row > 0 && row < BOARD_SIZE - 1) {
+    const aboveIdx = (row - 1) * BOARD_SIZE + col;
+    const belowIdx = (row + 1) * BOARD_SIZE + col;
+
+    if (board[aboveIdx].pawn?.playerId === opponentId) {
+      if (
+        !board[belowIdx].pawn &&
+        board[belowIdx].boardColor === state.playerColors[opponentId] &&
+        !(state.deadZoneSquares.get(belowIdx) === opponentId)
+      ) {
+        return true;
+      }
+    }
+
+    if (board[belowIdx].pawn?.playerId === opponentId) {
+      if (
+        !board[aboveIdx].pawn &&
+        board[aboveIdx].boardColor === state.playerColors[opponentId] &&
+        !(state.deadZoneSquares.get(aboveIdx) === opponentId)
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+applyActionToState(state: GameState, action: Action): GameState | null {
+  // Handle placement actions
+  if (action.type === "place") {
+    // Check both properties for placement actions
+    const index =
+      action.squareIndex !== undefined ? action.squareIndex : action.toIndex;
+    if (index !== undefined) {
+      return placePawn(state, index);
+    }
+  }
+  // Handle movement actions
+  else if (
+    action.type === "move" &&
+    action.fromIndex !== undefined &&
+    action.toIndex !== undefined
+  ) {
+    return movePawn(state, action.fromIndex, action.toIndex);
+  }
+  return null;
+}
+
+// UCT selection with quality bias
+selectChild(explorationWeight: number): MCTSNode | null {
+  let bestChild = null;
+  let bestScore = -Infinity;
+
+  for (const child of this.children) {
+    if (child.visits === 0) return child;
+
+    // UCT formula with additional quality bias
+    const exploitation = child.wins / child.visits;
+    const exploration =
+      explorationWeight * Math.sqrt(Math.log(this.visits) / child.visits);
+
+    // Add quality bias if available
+    let qualityBias = 0;
+    if (child.action && child.action.quality !== undefined) {
+      qualityBias = child.action.quality * 0.05; // Small weight for quality
+    }
+
+    const score = exploitation + exploration + qualityBias;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestChild = child;
+    }
+  }
+
+  return bestChild;
+}
+
+// Expand node by selecting an untried action
+expand(): MCTSNode | null {
+  if (this.untriedActions.length === 0) return null;
+
+  // Take the first (highest quality) untried action
+  // This biases expansion toward better moves
+  const action = this.untriedActions.shift()!;
+
+  const newState = this.applyActionToState(this.state, action);
+  if (!newState) {
+    // If invalid action, try another
+    if (this.untriedActions.length > 0) {
+      return this.expand();
     }
     return null;
   }
-  
-  isTerminal(state: GameState): boolean {
-    return state.winner !== null || 
-           (this.getValidActions(state).length === 1 && this.getValidActions(state)[0].type === 'none');
+
+  const childNode = new MCTSNode(newState, this, action);
+  this.children.push(childNode);
+  return childNode;
+}
+
+// Improved rollout with heuristic guidance
+rollout(maxDepth: number): number {
+  let currentState = structuredClone(this.state);
+  let depth = 0;
+
+  while (!this.isTerminal(currentState) && depth < maxDepth) {
+    const actions = this.getValidActions(currentState);
+    if (
+      actions.length === 0 ||
+      (actions.length === 1 && actions[0].type === "none")
+    ) {
+      break;
+    }
+
+    // Modified epsilon-greedy policy with strategic bias for early game
+    let chosenAction: Action;
+
+    // Placement phase: Be more deterministic about edge strategy
+    if (currentState.gamePhase === "placement") {
+      // 90% choose best action in placement phase
+      if (Math.random() < 0.9) {
+        chosenAction = actions[0]; // Best action (already sorted)
+      } else {
+        // 10% exploration, but still prefer higher quality moves
+        // Choose from top 3 actions if available
+        const topActions = actions.slice(0, Math.min(3, actions.length));
+        chosenAction =
+          topActions[Math.floor(Math.random() * topActions.length)];
+      }
+    }
+    // Movement phase: More standard epsilon-greedy
+    else {
+      if (Math.random() < 0.8) {
+        chosenAction = actions[0]; // Best action
+      } else {
+        chosenAction = actions[Math.floor(Math.random() * actions.length)];
+      }
+    }
+
+    const nextState = this.applyActionToState(currentState, chosenAction);
+    if (!nextState) break;
+
+    currentState = nextState;
+    depth++;
   }
 
-  getReward(state: GameState, perspectivePlayerId: PlayerId): number {
-    if (state.winner === perspectivePlayerId) return 1.0;
-    if (state.winner !== null && state.winner !== perspectivePlayerId) return 0.0; // Opponent won
-    return 0.5; // Draw or game still ongoing (should ideally not happen if isTerminal is true)
+  // For terminal states, return win/loss/draw
+  if (currentState.winner === this.playerWhoseTurnItIs) {
+    return 1.0; // Win
+  } else if (currentState.winner !== null) {
+    return 0.0; // Loss
+  }
+
+  // For non-terminal states, use heuristic evaluation
+  return this.evaluateState(currentState, this.playerWhoseTurnItIs);
+}
+
+
+  // Evaluate how much a position contributes to diagonal formations
+  evaluateDiagonalPotential(
+    state: GameState,
+    position: number,
+    playerId: PlayerId
+  ): number {
+    const board = state.board;
+    const row = Math.floor(position / 8);
+    const col = position % 8;
+    let score = 0;
+
+    // Check all 4 diagonal directions
+    const directions = [
+      { dr: 1, dc: 1 }, // Down-right
+      { dr: 1, dc: -1 }, // Down-left
+      { dr: -1, dc: 1 }, // Up-right
+      { dr: -1, dc: -1 }, // Up-left
+    ];
+
+    for (const direction of directions) {
+      // Look 3 steps in each direction
+      for (let step = -3; step <= 3; step++) {
+        if (step === 0) continue; // Skip the position itself
+
+        const r = row + direction.dr * step;
+        const c = col + direction.dc * step;
+
+        // Check if the position is valid
+        if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+          const idx = r * 8 + c;
+          const square = board[idx];
+
+          if (
+            square.pawn?.playerId === playerId &&
+            square.boardColor === state.playerColors[playerId] &&
+            !state.blockedPawnsInfo.has(idx) &&
+            !state.blockingPawnsInfo.has(idx) &&
+            !state.deadZoneCreatorPawnsInfo.has(idx)
+          ) {
+            // Distance factor - closer pawns are more valuable for diagonals
+            const distance = Math.abs(step);
+            if (distance <= 3) {
+              score += 4 - distance; // Higher score for closer pawns
+            }
+          }
+        }
+      }
+    }
+
+    return score;
+  }
+
+// Evaluate non-terminal states using heuristics
+evaluateState(state: GameState, perspectivePlayerId: PlayerId): number {
+  const opponentId = perspectivePlayerId === 1 ? 2 : 1;
+
+  if (state.gamePhase === "placement") {
+    // If we're player 2, we need to be more defensive
+    if (perspectivePlayerId === 2) {
+      // Check if opponent has any pawn pairs forming potential diagonals
+      for (let i = 0; i < state.board.length; i++) {
+        if (state.board[i].pawn?.playerId === opponentId) {
+          // High blocking value indicates opponent is forming diagonals
+          const blockingValue = this.evaluateBlockingDiagonalInPlacement(
+            state,
+            i,
+            opponentId
+          );
+
+          if (blockingValue > 0) {
+            // Penalize states where opponent has diagonal formations
+            return 0.3; // Significantly below average (0.5)
+          }
+        }
+      }
+    }
+  }
+
+  // Start with draw value
+  let score = 0.5;
+
+  // Count important game features
+  let myPawns = 0, opponentPawns = 0;
+  let myBlockedPawns = 0, opponentBlockedPawns = 0;
+  let myDeadZones = 0, opponentDeadZones = 0;
+
+  // Count diagonal potential
+  let myDiagonalPotential = 0;
+  let opponentDiagonalPotential = 0;
+
+  // Count pawns and blocked pawns
+  for (let i = 0; i < state.board.length; i++) {
+    const square = state.board[i];
+
+    if (square.pawn) {
+      if (square.pawn.playerId === perspectivePlayerId) {
+        myPawns++;
+        if (state.blockedPawnsInfo.has(i)) {
+          myBlockedPawns++;
+        }
+      } else {
+        opponentPawns++;
+        if (state.blockedPawnsInfo.has(i)) {
+          opponentBlockedPawns++;
+        }
+      }
+    }
+  }
+
+  // Count dead zones
+  state.deadZoneSquares.forEach((player, _) => {
+    if (player === perspectivePlayerId) {
+      myDeadZones++;
+    } else {
+      opponentDeadZones++;
+    }
+  });
+
+  // Evaluate diagonal formation potential for both players
+  for (let i = 0; i < state.board.length; i++) {
+    if (state.board[i].pawn?.playerId === perspectivePlayerId) {
+      myDiagonalPotential += this.evaluateDiagonalPotential(
+        state,
+        i,
+        perspectivePlayerId
+      );
+    } else if (state.board[i].pawn?.playerId === opponentId) {
+      opponentDiagonalPotential += this.evaluateDiagonalPotential(
+        state,
+        i,
+        opponentId
+      );
+    }
+  }
+
+  // Calculate final score
+  // Small adjustment for pawn count
+  score += 0.02 * (myPawns - opponentPawns);
+
+  // Medium adjustment for blocked pawns (bad to have blocked pawns)
+  score += 0.05 * (opponentBlockedPawns - myBlockedPawns);
+
+  // Large adjustment for dead zones (bad to have dead zones)
+  score += 0.07 * (opponentDeadZones - myDeadZones);
+
+  // Very large adjustment for diagonal potential (this is how you win)
+  score += 0.1 * (myDiagonalPotential - opponentDiagonalPotential);
+
+  // First-player advantage compensation
+  if (perspectivePlayerId === 2) {
+    // If we're the second player
+    score -= 0.05; // Slight penalty to account for first-player advantage
+  }
+
+  // Clamp between 0.1 and 0.9 to avoid overconfidence
+  return Math.max(0.1, Math.min(0.9, score));
+}
+
+isTerminal(state: GameState): boolean {
+  return state.winner !== null;
+}
+
+backpropagate(result: number): void {
+  let node: MCTSNode | null = this;
+  while (node) {
+    node.visits++;
+    node.wins += result;
+    node = node.parent;
+    result = 1 - result; // Flip result for parent (opponent's perspective)
   }
 }
+}
+
+/**
+* Main MCTS algorithm
+*/
+export class MCTS {
+initialState: GameState;
+iterations: number;
+timeLimit: number;
+explorationWeight: number;
+maxRolloutDepth: number;
+
+constructor(initialState: GameState, difficulty: string, config: any = {}) {
+  this.initialState = structuredClone(initialState);
+
+  // Set parameters based on difficulty
+  this.iterations = config.iterations || 10000;
+  this.timeLimit = 2000; // 2 seconds max
+  this.explorationWeight = config.exploration || Math.sqrt(2);
+  this.maxRolloutDepth = config.simulationDepth || 50;
+}
+
+/**
+ * Find the best action using MCTS
+ */
+findBestAction(): Action | null {
+  const rootNode = new MCTSNode(this.initialState);
+
+  // Immediate return if only one valid action
+  if (rootNode.untriedActions.length === 0) return null;
+  if (rootNode.untriedActions.length === 1) return rootNode.untriedActions[0];
+
+  const startTime = Date.now();
+  let iterations = 0;
+
+  // Run MCTS iterations
+  while (
+    iterations < this.iterations &&
+    Date.now() - startTime < this.timeLimit
+  ) {
+    // Selection
+    let node = rootNode;
+    while (node.untriedActions.length === 0 && node.children.length > 0) {
+      const selectedChild = node.selectChild(this.explorationWeight);
+      if (!selectedChild) break;
+      node = selectedChild;
+    }
+
+    // Expansion
+    if (node.untriedActions.length > 0 && !node.isTerminal(node.state)) {
+      const expandedNode = node.expand();
+      if (!expandedNode) continue; // Invalid action, try again
+      node = expandedNode;
+    }
+
+    // Simulation
+    const result = node.rollout(this.maxRolloutDepth);
+
+    // Backpropagation
+    node.backpropagate(result);
+
+    iterations++;
+  }
+
+  // Find best child based on average score (not visit count)
+  let bestChild = null;
+  let bestScore = -Infinity;
+
+  for (const child of rootNode.children) {
+    // Use average score for final selection, not UCT
+    const score = child.visits > 0 ? child.wins / child.visits : 0;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestChild = child;
+    }
+  }
+
+  // Return the action of the best child
+  if (bestChild) {
+    // Log info about the decision quality
+    const winRate = ((bestChild.wins / bestChild.visits) * 100).toFixed(1);
+    console.log(
+      `Selected move: ${JSON.stringify(
+        bestChild.action
+      )} with win rate ${winRate}% after ${iterations} iterations`
+    );
+    return bestChild.action;
+  }
+
+  // Fallback to first action if no children
+  return rootNode.untriedActions.length > 0
+    ? rootNode.untriedActions[0]
+    : null;
+}
+}
+

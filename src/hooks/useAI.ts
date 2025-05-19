@@ -6,9 +6,9 @@ import type { Action as AIAction } from '@/lib/ai/mcts';
 
 const workerCache = new Map<string, Worker>();
 
-function createNewAIWorker(): Worker | null {
+function createNewAIWorker(): Worker | undefined {
   if (typeof window === 'undefined') {
-    return null;
+    return undefined;
   }
   // Updated path as per user suggestion
   return new Worker(new URL('../../public/workers/mcts-worker.js', import.meta.url), { type: 'module' });

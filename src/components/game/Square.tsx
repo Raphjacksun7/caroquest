@@ -1,12 +1,10 @@
-
 "use client";
 
-import type { SquareState, GameState, PlayerId } from '@/lib/gameLogic';
+import type { SquareState, GameState } from '@/lib/gameLogic';
 import { Pawn } from './Pawn';
 import { cn } from '@/lib/utils';
 import React from 'react';
-// BOARD_SIZE can be imported if needed, but algebraic notation was removed.
-// import { BOARD_SIZE } from '@/lib/gameLogic'; 
+import { BOARD_SIZE } from '@/lib/gameLogic';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface SquareProps {
@@ -14,8 +12,8 @@ interface SquareProps {
   gameState: GameState;
   onClick: () => void;
   onPawnDragStart: (pawnIndex: number) => void;
-  onDragOverSquare: (e: React.DragEvent<HTMLDivElement>) => void;
-  onDropOnSquare: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragOverSquare: (e: React.DragEvent<HTMLButtonElement>) => void;
+  onDropOnSquare: (e: React.DragEvent<HTMLButtonElement>) => void;
 }
 
 export const Square = ({
@@ -30,7 +28,8 @@ export const Square = ({
   const { winner, currentPlayerId, playerColors, deadZoneSquares, lastMove, winningLine } = gameState;
   const [isDragOver, setIsDragOver] = React.useState(false);
 
-  const deadZoneForPlayerId = deadZoneSquares.get(index); 
+  // Dead zone logic
+  const deadZoneForPlayerId = deadZoneSquares.get(index);
   const isActualDeadZone = deadZoneForPlayerId !== undefined;
   const isDeadZoneForCurrentPlayer = deadZoneForPlayerId === currentPlayerId;
   
@@ -43,6 +42,7 @@ export const Square = ({
     tooltipContentText = `Dead Zone: ${affectedPlayerName} cannot use this square for winning or placement.`;
   }
 
+  // Visual styling based on square state
   let squareBgStyle: React.CSSProperties = {};
   let baseBgClass = boardColor === 'light' 
     ? 'bg-[hsl(var(--board-light-square))]' 
@@ -53,11 +53,8 @@ export const Square = ({
 
   if (isWinningSquare) {
      squareBgStyle = { backgroundColor: 'hsl(var(--highlight-win-line-bg))' };
-     // bg-opacity might not work directly with HSL, so setting directly.
   } else if (highlight === 'selectedPawn') {
-    // Selected pawn highlight is primarily on the Pawn itself using border/ring.
-    // Square itself doesn't need strong highlight if pawn is clearly marked.
-    // No specific background change for the square of a selected pawn.
+    // Selected pawn highlight is primarily on the Pawn itself using border/ring
   } else if (highlight === 'validMove') {
     squareBgStyle = { backgroundColor: boardColor === 'light' ? 'hsl(var(--highlight-valid-move-bg))' : 'hsl(var(--highlight-valid-move-dark-bg))' };
     hoverInteractionClasses = 'hover:brightness-95'; // Slight darken on hover for valid moves
@@ -68,7 +65,7 @@ export const Square = ({
     squareBgStyle = { backgroundColor: boardColor === 'light' ? 'hsl(var(--highlight-last-move-light-bg))' : 'hsl(var(--highlight-last-move-dark-bg))' };
   }
 
-
+  // Cursor and interaction logic
   let cursorClass = 'cursor-default';
   if (!winner) {
     if (gameState.gamePhase === 'placement' && !pawn && isCurrentPlayerSquareColor && !isDeadZoneForCurrentPlayer) {
@@ -87,13 +84,13 @@ export const Square = ({
     }
   }
   
-  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragEnter = (e: React.DragEvent<HTMLButtonElement>) => {
     if (highlight === 'validMove' && !pawn && !isDeadZoneForCurrentPlayer) { 
       setIsDragOver(true);
     }
   };
 
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragLeave = (e: React.DragEvent<HTMLButtonElement>) => {
     setIsDragOver(false);
   };
   
@@ -118,10 +115,12 @@ export const Square = ({
       aria-label={`Square ${String.fromCharCode(97 + col)}${BOARD_SIZE - row}, ${boardColor}, ${pawn ? `Player ${pawn.playerId} piece` : 'Empty'}${gameState.blockedPawnsInfo.has(index) ? ', Blocked' : ''}${isActualDeadZone ? `, Dead Zone for Player ${deadZoneForPlayerId}` : ''}${highlight === 'selectedPawn' ? ', Selected' : ''}${highlight === 'validMove' ? ', Valid Move' : ''}`}
       disabled={!!winner || (isDeadZoneForCurrentPlayer && !pawn)} 
     >
+      {/* Show dead zone marker (X) only if it's a dead zone and doesn't have a pawn */}
       {isActualDeadZone && !pawn && ( 
          <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--highlight-dead-zone-marker))] opacity-70 text-4xl font-bold pointer-events-none select-none">×</div>
       )}
       
+      {/* Show valid move indicator if it's a valid move destination and not occupied */}
       {highlight === 'validMove' && !pawn && !isActualDeadZone && (
         <div className={cn(
             "absolute w-3 h-3 rounded-full opacity-80 pointer-events-none select-none",
@@ -157,5 +156,4 @@ export const Square = ({
   }
 
   return squareElement;
-};
-    
+}
