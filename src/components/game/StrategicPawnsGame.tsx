@@ -15,7 +15,7 @@ import { GameBoard } from "@/components/game/GameBoard";
 import { PlayerCard } from "@/components/game/PlayerCard";
 import { ControlsCard } from "@/components/game/ControlsCard";
 import { HistoryCard } from "@/components/game/HistoryCard";
-import { RulesDialog } from "@/components/game/RulesDialog";
+import { RulesDialogContent } from "@/components/game/RulesDialog";
 import { WinnerDialog } from "@/components/game/WinnerDialog";
 import { StatusDisplay } from "@/components/game/StatusDisplay";
 import { Toaster } from "@/components/ui/toaster";
@@ -886,7 +886,7 @@ export function StrategicPawnsGame() {
       <Toaster />
 
       <Dialog open={isRulesOpen} onOpenChange={setIsRulesOpen}>
-        <RulesDialog pawnsPerPlayer={PAWNS_PER_PLAYER} />
+        <RulesDialogContent pawnsPerPlayer={PAWNS_PER_PLAYER} />
       </Dialog>
 
       {activeGameState.winner && (

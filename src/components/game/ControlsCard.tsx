@@ -19,8 +19,8 @@ interface ControlsCardProps {
   onOpenRules: () => void;
   pawnsPerPlayer: number; 
   isGameActive: boolean;
-  currentLanguage: 'en' | 'fr';
-  onSetLanguage: (lang: 'en' | 'fr') => void;
+  currentLanguage?: string;
+  onSetLanguage?: (language: string) => void;
 }
 
 export const ControlsCard = ({ 
@@ -28,8 +28,8 @@ export const ControlsCard = ({
     onOpenRules, 
     pawnsPerPlayer, 
     isGameActive,
-    currentLanguage,
-    onSetLanguage
+    currentLanguage = 'en',
+    onSetLanguage = () => {}
 }: ControlsCardProps) => {
   const { t } = useTranslation();
 

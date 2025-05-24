@@ -1,15 +1,16 @@
 
 "use client";
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { GameState, PlayerId, StoredPlayer, GameOptions } from '@/lib/types';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla'; // Changed from 'zustand' to 'zustand/vanilla'
+import { useStore } from 'zustand'; // For using the vanilla store in React components
 import { deserializeGameState } from '@/lib/serialization';
 import { applyDeltaUpdatesToGameState } from '@/lib/clientUtils';
-import { assignPlayerColors, PAWNS_PER_PLAYER, createInitialGameState as createClientInitialGameState, BOARD_SIZE } from '@/lib/gameLogic';
+import { createInitialGameState, PAWNS_PER_PLAYER, assignPlayerColors, BOARD_SIZE } from '@/lib/gameLogic';
 import LZString from 'lz-string';
 
-export type { StoredPlayer } from '@/lib/types';
+export type { StoredPlayer }; 
 
 export interface GameStoreState {
   gameState: GameState | null;
@@ -22,9 +23,12 @@ export interface GameStoreState {
   isWaitingForOpponent: boolean;
   pingLatency: number;
   players: StoredPlayer[];
-  setGameState: (state: GameState | null, options?: GameOptions) => void; // Added options
+}
+
+export interface GameStoreActions {
+  setGameState: (state: GameState | null) => void;
   setError: (error: string | null) => void;
-  applyDeltaUpdates: (updates: any[], seqId?: number) => void; // Made seqId optional
+  applyDeltaUpdates: (updates: any[], seqId?: number) => void;
   setPlayers: (players: StoredPlayer[]) => void;
   setGameId: (gameId: string | null) => void;
   setLocalPlayerId: (playerId: PlayerId | null) => void;
@@ -34,11 +38,14 @@ export interface GameStoreState {
   setIsWaitingForOpponent: (waiting: boolean) => void;
   setPingLatency: (latency: number) => void;
   clearStore: () => void;
-  resetForNewGame: (options?: GameOptions) => void; // Added options
+  resetForNewGame: (options?: GameOptions) => void;
 }
 
+export type FullGameStore = GameStoreState & GameStoreActions;
 
-const useGameStore = create<GameStoreState>((set, get) => ({
+const initialGameState: GameState = createInitialGameState({ pawnsPerPlayer: PAWNS_PER_PLAYER});
+
+const initialStoreState: GameStoreState = {
   gameState: null,
   localPlayerId: null,
   opponentName: null,
@@ -49,13 +56,20 @@ const useGameStore = create<GameStoreState>((set, get) => ({
   isWaitingForOpponent: false,
   pingLatency: 0,
   players: [],
-  setGameState: (gameState, options) => { // Accept options
+};
+
+export const gameStore = createStore<FullGameStore>()((set, get) => ({
+  ...initialStoreState,
+  setGameState: (gameState) => {
     if (gameState) {
-      const currentOptions = options || gameState.options || {};
+      const currentOptions = gameState.options || { pawnsPerPlayer: PAWNS_PER_PLAYER };
       const pawnsPerPlayer = currentOptions.pawnsPerPlayer || PAWNS_PER_PLAYER;
+      
       const hydratedState: GameState = {
         ...gameState,
-        board: gameState.board && gameState.board.length === BOARD_SIZE * BOARD_SIZE ? gameState.board : createClientInitialGameState(currentOptions).board,
+        board: gameState.board && gameState.board.length === BOARD_SIZE * BOARD_SIZE 
+               ? gameState.board 
+               : createInitialGameState(currentOptions).board,
         playerColors: gameState.playerColors || assignPlayerColors(),
         blockedPawnsInfo: new Set(Array.from(gameState.blockedPawnsInfo || [])),
         blockingPawnsInfo: new Set(Array.from(gameState.blockingPawnsInfo || [])),
@@ -64,7 +78,7 @@ const useGameStore = create<GameStoreState>((set, get) => ({
         pawnsToPlace: gameState.pawnsToPlace || {1: pawnsPerPlayer, 2: pawnsPerPlayer},
         placedPawns: gameState.placedPawns || {1:0, 2:0},
         highlightedValidMoves: gameState.highlightedValidMoves || [],
-        options: currentOptions, // Store options
+        options: currentOptions,
       };
       set({ gameState: hydratedState });
     } else {
@@ -72,11 +86,11 @@ const useGameStore = create<GameStoreState>((set, get) => ({
     }
   },
   setError: (error) => set({ error, isWaitingForOpponent: false, isConnecting: false }),
-  applyDeltaUpdates: (updates, seqId) => { // seqId is optional
+  applyDeltaUpdates: (updates, seqId) => {
     const currentState = get().gameState;
     if (!currentState) return;
     const newState = applyDeltaUpdatesToGameState(currentState, updates, seqId);
-    set({ gameState: { ...newState } });
+    set({ gameState: { ...newState } }); 
   },
   setPlayers: (players) => set({ players }),
   setGameId: (gameId) => set({ gameId }),
@@ -86,18 +100,20 @@ const useGameStore = create<GameStoreState>((set, get) => ({
   setIsConnecting: (connecting) => set({ isConnecting: connecting }),
   setIsWaitingForOpponent: (waiting) => set({ isWaitingForOpponent: waiting }),
   setPingLatency: (latency) => set({ pingLatency: latency }),
-  clearStore: () => set({
-    gameState: null, localPlayerId: null, opponentName: null, gameId: null, error: null,
-    isConnecting: false, isConnected: false, isWaitingForOpponent: false, pingLatency: 0, players: [],
-  }),
-  resetForNewGame: (options) => set(() => { // Accept options
+  clearStore: () => set({ ...initialStoreState }),
+  resetForNewGame: (options) => set(() => {
     return {
-      gameState: createClientInitialGameState(options), // Pass options
-      localPlayerId: null, opponentName: null, gameId: null, error: null,
-      isWaitingForOpponent: false, pingLatency: 0, players: [],
+      ...initialStoreState, // Reset all state parts
+      gameState: createInitialGameState(options), 
     }
   }),
 }));
+
+// Custom hook to use the vanilla store
+export function useGameStore<T>(selector: (state: FullGameStore) => T): T {
+    return useStore(gameStore, selector);
+}
+
 
 export function useGameConnection() {
   const socketRef = useRef<Socket | null>(null);
@@ -105,13 +121,25 @@ export function useGameConnection() {
   const serverTimeOffset = useRef<number>(0);
 
   const {
-    gameState, localPlayerId, opponentName, gameId, error,
-    isConnected, isConnecting, isWaitingForOpponent, pingLatency, players,
     setGameState, setError, applyDeltaUpdates: storeApplyDeltaUpdates, setPlayers,
     setGameId, setLocalPlayerId, setOpponentName, setIsConnected,
     setIsConnecting, setIsWaitingForOpponent, setPingLatency,
     clearStore, resetForNewGame
-  } = useGameStore();
+  } = gameStore.getState(); // Get actions directly from vanilla store
+
+  // Use useGameStore hook for reactive state access
+  const gameState = useGameStore(state => state.gameState);
+  const localPlayerId = useGameStore(state => state.localPlayerId);
+  const opponentName = useGameStore(state => state.opponentName);
+  const gameId = useGameStore(state => state.gameId);
+  const error = useGameStore(state => state.error);
+  const isConnected = useGameStore(state => state.isConnected);
+  const isConnecting = useGameStore(state => state.isConnecting);
+  const isWaitingForOpponent = useGameStore(state => state.isWaitingForOpponent);
+  const pingLatency = useGameStore(state => state.pingLatency);
+  const players = useGameStore(state => state.players);
+
+  const socketUrl = useMemo(() => process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== 'undefined' ? window.location.origin : ''), []);
 
 
   const syncTime = useCallback(() => {
@@ -134,21 +162,20 @@ export function useGameConnection() {
         resolve(socketRef.current);
         return;
       }
-      if (useGameStore.getState().isConnecting) { 
+      if (gameStore.getState().isConnecting) { 
         console.log("CLIENT: Socket.IO: Connection attempt already in progress (store).");
         const checkConnectionInterval = setInterval(() => {
           if (socketRef.current?.connected) {
             clearInterval(checkConnectionInterval);
             resolve(socketRef.current);
-          } else if (!useGameStore.getState().isConnecting) { 
+          } else if (!gameStore.getState().isConnecting) { 
             clearInterval(checkConnectionInterval);
-            reject(new Error(useGameStore.getState().error || "Previous connection attempt failed."));
+            reject(new Error(gameStore.getState().error || "Previous connection attempt failed."));
           }
         }, 100);
         return;
       }
       
-      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
       console.log('CLIENT: Socket.IO: Attempting to connect to:', socketUrl);
 
       if (socketRef.current) {
@@ -157,12 +184,12 @@ export function useGameConnection() {
       }
       
       const newSocket = io(socketUrl, {
-        transports: ['websocket', 'polling'],
+        // transports: ['websocket'], // Allow Socket.IO to negotiate transport
         reconnectionAttempts: 3, 
         reconnectionDelay: 2000, 
         reconnectionDelayMax: 10000, 
         timeout: 15000, 
-        path: "socket.io", 
+        path: "/api/socketio/", 
         autoConnect: false, 
       });
       socketRef.current = newSocket;
@@ -171,7 +198,7 @@ export function useGameConnection() {
       setError(null);
 
       const connectionTimeoutId = setTimeout(() => {
-        if (newSocket.active && !newSocket.connected) { 
+        if (newSocket && !newSocket.connected) { 
           console.error('CLIENT: Socket.IO: Explicit connection timeout after 15s.');
           const timeoutError = 'Socket.IO: Connection timeout. Server may be unavailable or a network issue is preventing connection.';
           setError(timeoutError);
@@ -212,7 +239,7 @@ export function useGameConnection() {
         setIsConnected(false);
         setIsConnecting(false);
         if (reason !== 'io client disconnect' && reason !== 'io server disconnect') {
-          setError(`Disconnected: ${reason}. Attempting to reconnect...`);
+          setError(`Disconnected: ${reason}.`);
         } else {
           setError(null); 
         }
@@ -220,7 +247,7 @@ export function useGameConnection() {
       
       newSocket.connect(); 
     });
-  }, [setIsConnecting, setError, setIsConnected, syncTime]);
+  }, [setIsConnecting, setError, setIsConnected, syncTime, socketUrl]);
   
   useEffect(() => {
     const currentSocket = socketRef.current;
@@ -244,13 +271,10 @@ export function useGameConnection() {
         if (decompressedBinaryString === null) {
             throw new Error(`LZString decompression (from ${origin}) returned null.`);
         }
-        const originalBinaryData = new Uint8Array(decompressedBinaryString.length);
-        for (let i = 0; i < decompressedBinaryString.length; i++) {
-          originalBinaryData[i] = decompressedBinaryString.charCodeAt(i);
-        }
         
-        const deserialized = deserializeGameState(originalBinaryData); 
-        
+        // Convert the decompressed string back to Uint8Array
+        const decompressedUint8Array = new TextEncoder().encode(decompressedBinaryString);
+        const deserialized = deserializeGameState(decompressedUint8Array);         
         if (typeof deserialized !== 'object' || deserialized === null) {
             throw new Error(`Deserialized game state (from ${origin}) is not a valid object.`);
         }
@@ -265,24 +289,24 @@ export function useGameConnection() {
       }
     };
     
-    const handleGameCreated = ({ gameId: newGameId, playerId: newPlayerId, gameState: compressedArr, players: newPlayers, options }: { gameId: string; playerId: PlayerId; gameState: ArrayBuffer | Uint8Array; players: StoredPlayer[], options: GameOptions}) => {
+    const handleGameCreated = ({ gameId: newGameId, playerId: newPlayerId, gameState: compressedArr, players: newPlayers, options }: { gameId: string; playerId: PlayerId; gameState: Uint8Array; players: StoredPlayer[], options: GameOptions}) => {
       const decodedState = handleSerializedState(compressedArr, 'game_created');
       if (decodedState) {
         setGameId(newGameId);
         setLocalPlayerId(newPlayerId);
-        setGameState(decodedState, options); // Pass options
+        setGameState({...decodedState, options });
         setPlayers(newPlayers);
         setIsWaitingForOpponent(newPlayers.filter(p=>p.isConnected).length < 2);
         setError(null);
       }
     };
 
-    const handleGameJoined = ({ gameId: joinedGameId, playerId: joinedPlayerId, gameState: compressedArr, players: joinedPlayers, opponentName: joinedOpponentName, options }: { gameId: string; playerId: PlayerId; gameState: ArrayBuffer | Uint8Array; players: StoredPlayer[], opponentName: string | null, options: GameOptions }) => {
+    const handleGameJoined = ({ gameId: joinedGameId, playerId: joinedPlayerId, gameState: compressedArr, players: joinedPlayers, opponentName: joinedOpponentName, options }: { gameId: string; playerId: PlayerId; gameState: Uint8Array; players: StoredPlayer[], opponentName: string | null, options: GameOptions }) => {
        const decodedState = handleSerializedState(compressedArr, 'game_joined');
        if (decodedState) {
         setGameId(joinedGameId);
         setLocalPlayerId(joinedPlayerId);
-        setGameState(decodedState, options); // Pass options
+        setGameState({...decodedState, options });
         setPlayers(joinedPlayers);
         setOpponentName(joinedOpponentName);
         setIsWaitingForOpponent(joinedPlayers.filter(p=>p.isConnected).length < 2 && !joinedOpponentName);
@@ -297,20 +321,20 @@ export function useGameConnection() {
         setError(null);
     };
     
-    const handleGameStart = ({ gameState: compressedArr, players: gameStartPlayers, options }: { gameState: ArrayBuffer | Uint8Array; players: StoredPlayer[], options: GameOptions }) => {
+    const handleGameStart = ({ gameState: compressedArr, players: gameStartPlayers, options }: { gameState: Uint8Array; players: StoredPlayer[], options: GameOptions }) => {
         const decodedState = handleSerializedState(compressedArr, 'game_start');
         if (decodedState) {
-            setGameState(decodedState, options); // Pass options
+            setGameState({...decodedState, options });
             setPlayers(gameStartPlayers);
             setIsWaitingForOpponent(false);
             setError(null);
         }
     };
     
-    const handleGameUpdated = ({ gameState: compressedArr, options }: { gameState: ArrayBuffer | Uint8Array; options?: GameOptions}) => {
+    const handleGameUpdated = ({ gameState: compressedArr, options }: { gameState: Uint8Array; options?: GameOptions}) => {
         const decodedState = handleSerializedState(compressedArr, 'game_updated (full)');
         if (decodedState) {
-            setGameState(decodedState, options || decodedState.options); // Use new options if provided, else existing
+            setGameState({...decodedState, options });
             setError(null);
         }
     };
@@ -322,7 +346,7 @@ export function useGameConnection() {
         } catch (error: any) {
             console.error('CLIENT: Error processing game_delta:', error);
             setError(`Failed to apply update: ${error.message}. Requesting full state.`);
-            const currentLobbyId = useGameStore.getState().gameId;
+            const currentLobbyId = gameStore.getState().gameId;
             if (socketRef.current && currentLobbyId) {
               socketRef.current.emit('request_full_state', { gameId: currentLobbyId });
             }
@@ -332,7 +356,8 @@ export function useGameConnection() {
     const handleOpponentDisconnected = ({ playerName: disconnectedPlayerName, playerId: disconnectedPlayerId, remainingPlayers }: { playerName: string; playerId: PlayerId; remainingPlayers: StoredPlayer[] }) => {
         setError(`${disconnectedPlayerName} has disconnected. Waiting for them to rejoin or for a new opponent.`);
         setPlayers(remainingPlayers);
-        if(localPlayerId !== disconnectedPlayerId) { 
+        const currentLocalPlayerId = gameStore.getState().localPlayerId;
+        if(currentLocalPlayerId !== disconnectedPlayerId) { 
             setOpponentName(null); 
         }
         setIsWaitingForOpponent(true); 
@@ -355,8 +380,8 @@ export function useGameConnection() {
       setGameId(newGameId);
       setLocalPlayerId(assignedPlayerId);
       setOpponentName(newOpponentName);
-      const initialMatchState = createClientInitialGameState(options); // Pass options
-      setGameState(initialMatchState, options); // Ensure options are set here
+      const initialMatchState = createInitialGameState(options); 
+      setGameState({...initialMatchState, options});
       setIsWaitingForOpponent(false); 
     };
 
@@ -392,7 +417,7 @@ export function useGameConnection() {
 
   const getAdjustedTime = useCallback(() => Date.now() + serverTimeOffset.current, []);
   
-  const createGame = useCallback(async (playerName: string, options: GameOptions = {}) => {
+  const createGame = useCallback(async (playerName: string, options: GameOptions = { pawnsPerPlayer: PAWNS_PER_PLAYER }) => {
     let currentSocket = socketRef.current;
     if (!currentSocket || !currentSocket.connected) {
        try {
@@ -406,11 +431,11 @@ export function useGameConnection() {
       setError("Still not connected. Cannot create game.");
       return;
     }
-    resetForNewGame(options); // Pass options
+    resetForNewGame(options);
     currentSocket.emit('create_game', { playerName, options, clientTimestamp: getAdjustedTime() });
   }, [connectSocketIO, getAdjustedTime, setError, resetForNewGame]);
 
-  const joinGame = useCallback(async (gameIdToJoin: string, playerName: string, options?: GameOptions) => { // Accept options
+  const joinGame = useCallback(async (gameIdToJoin: string, playerName: string, options?: GameOptions) => {
     let currentSocket = socketRef.current;
     if (!currentSocket || !currentSocket.connected) {
       try {
@@ -424,15 +449,15 @@ export function useGameConnection() {
       setError("Still not connected. Cannot join game.");
       return;
     }
-    resetForNewGame(options); // Pass options
+    resetForNewGame(options);
     setGameId(gameIdToJoin); 
-    currentSocket.emit('join_game', { gameId: gameIdToJoin, playerName, options, clientTimestamp: getAdjustedTime() }); // Send options
+    currentSocket.emit('join_game', { gameId: gameIdToJoin, playerName, options, clientTimestamp: getAdjustedTime() });
   }, [connectSocketIO, getAdjustedTime, setError, resetForNewGame, setGameId]);
 
 
   const placePawnAction = useCallback((squareIndex: number) => {
     const currentSocket = socketRef.current;
-    const currentLobbyId = useGameStore.getState().gameId;
+    const currentLobbyId = gameStore.getState().gameId;
     if (!currentSocket || !currentLobbyId || !currentSocket.connected) {
         setError("Not connected or no game ID."); return;
     }
@@ -441,7 +466,7 @@ export function useGameConnection() {
 
   const movePawnAction = useCallback((fromIndex: number, toIndex: number) => {
     const currentSocket = socketRef.current;
-    const currentLobbyId = useGameStore.getState().gameId;
+    const currentLobbyId = gameStore.getState().gameId;
     if (!currentSocket || !currentLobbyId || !currentSocket.connected) {
         setError("Not connected or no game ID."); return;
     }
@@ -497,5 +522,3 @@ export function useGameConnection() {
     joinMatchmakingQueue, leaveMatchmakingQueue,
   };
 }
-
-export { useGameStore };
