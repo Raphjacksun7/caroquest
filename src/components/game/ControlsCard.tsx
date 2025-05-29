@@ -13,14 +13,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+type Locale = 'en' | 'fr'; 
 
 interface ControlsCardProps {
   onReset: () => void;
   onOpenRules: () => void;
   pawnsPerPlayer: number; 
   isGameActive: boolean;
-  currentLanguage?: string;
-  onSetLanguage?: (language: string) => void;
+  currentLanguage?: Locale; 
+  onSetLanguage?: (language: Locale) => void; 
 }
 
 export const ControlsCard = ({ 
@@ -78,4 +79,3 @@ export const ControlsCard = ({
     </Card>
   );
 };
-    

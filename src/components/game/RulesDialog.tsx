@@ -15,8 +15,7 @@ import { Lock, Shield, Zap } from "lucide-react";
 
 interface RulesDialogContentProps {
   pawnsPerPlayer: number;
-  // onClose is not strictly needed if we use DialogClose, but kept if direct control is desired
-  // onClose?: () => void;
+  onClose?: () => void;
 }
 
 export function RulesDialogContent({

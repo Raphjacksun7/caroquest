@@ -72,6 +72,3 @@ export const StatusDisplay = ({ gameState, player1Name, player2Name }: StatusDis
   );
 };
 
-// Add new translation key
-// "statusPlayerTurnSimple": "{{playerName}}'s Turn"
-// "statusPlayerWins": "{{winner}} Wins!" (Updated to accept name)

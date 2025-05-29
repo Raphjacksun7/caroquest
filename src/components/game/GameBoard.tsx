@@ -20,7 +20,7 @@ export const GameBoard = ({
 }: GameBoardProps) => {
   const { board } = gameState;
 
-  const handleDragOverSquare = (e: React.DragEvent<HTMLDivElement>, squareIndex: number) => {
+  const handleDragOverSquare = (e: React.DragEvent<HTMLButtonElement>, squareIndex: number) => {
     e.preventDefault(); 
     const targetSquare = board[squareIndex];
     if (targetSquare.highlight === 'validMove') {
@@ -30,7 +30,7 @@ export const GameBoard = ({
     }
   };
 
-  const handleDropOnSquare = (e: React.DragEvent<HTMLDivElement>, squareIndex: number) => {
+  const handleDropOnSquare = (e: React.DragEvent<HTMLButtonElement>, squareIndex: number) => {
     e.preventDefault();
     onPawnDrop(squareIndex);
   };

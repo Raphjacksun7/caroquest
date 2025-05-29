@@ -9,8 +9,8 @@ import { useTranslation } from '@/hooks/useTranslation';
 
 interface PlayerCardProps {
   playerId: PlayerId;
-  playerName: string; // Added playerName
-  isLocalPlayer: boolean; // Added to indicate if this card represents the local player
+  playerName: string; 
+  isLocalPlayer: boolean; 
   gameState: GameState;
 }
 

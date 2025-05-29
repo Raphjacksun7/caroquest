@@ -10,7 +10,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 
 interface WinnerDialogProps {
   winner: PlayerId | null;
-  winnerName: string; // Added winnerName
+  winnerName: string; 
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onPlayAgain: () => void;
@@ -22,7 +22,6 @@ export const WinnerDialog = ({ winner, winnerName, isOpen, onOpenChange, onPlayA
   if (!isOpen || !winner) return null;
 
   const winnerColorVar = winner === 1 ? '--player1-pawn-color' : '--player2-pawn-color';
-  // const playerPawnColorName = winner === 1 ? t('redPawns') : t('bluePawns'); // Use winnerName directly
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -48,5 +47,3 @@ export const WinnerDialog = ({ winner, winnerName, isOpen, onOpenChange, onPlayA
   );
 };
 
-// Add new translation key
-// "playerDynamicWins": "{{playerName}} Wins!"

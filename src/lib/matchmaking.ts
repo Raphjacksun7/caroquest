@@ -1,103 +1,116 @@
+// FILE: src/lib/matchmaking.ts
+// PURPOSE: Handles the automated matchmaking queue and process.
 
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { GameStore } from './gameStore'; 
-import type { PlayerId, StoredPlayer, GameOptions } from './types'; 
+import type { PlayerId, GameOptions, StoredPlayer } from './types'; 
+import { PAWNS_PER_PLAYER } from './gameLogic'; 
 
+/**
+ * Represents a player waiting in the matchmaking queue.
+ */
 interface MatchmakingPlayer {
   socketId: string;
   name: string;
   rating: number; 
-  joinTime: number;
-  socket: Socket; 
+  joinTime: number; // Timestamp of when the player joined the queue
+  socket: Socket; // Direct reference to the player's socket for communication
 }
 
 const matchmakingQueue: MatchmakingPlayer[] = [];
-let matchmakingInterval: NodeJS.Timeout | null = null;
+let matchmakingIntervalId: NodeJS.Timeout | null = null; 
 
-export function setupMatchmaking(io: SocketIOServer, gameStore: GameStore) {
-  console.log('Matchmaking: Initialized with in-memory queue.');
+/**
+ * Starts the matchmaking interval to periodically process the queue.
+ * @param io The main Socket.IO server instance.
+ * @param gameStore The game store instance for creating and managing games.
+ * @returns A cleanup function to stop the matchmaking interval.
+ */
+export function startMatchmakingProcessor(io: SocketIOServer, gameStore: GameStore): () => void {
+  console.log('Matchmaking: Starting matchmaking processor.');
 
-  if (matchmakingInterval) {
-    clearInterval(matchmakingInterval);
-  }
+  if (matchmakingIntervalId) clearInterval(matchmakingIntervalId);
 
-  matchmakingInterval = setInterval(async () => {
-    if (matchmakingQueue.length >= 2) {
-      matchmakingQueue.sort((a, b) => {
-        return a.joinTime - b.joinTime; // Simple FIFO
-      });
+  matchmakingIntervalId = setInterval(async () => {
+    if (matchmakingQueue.length < 2) return;
+
+    matchmakingQueue.sort((a, b) => a.joinTime - b.joinTime); 
+    
+    const player1Entry = matchmakingQueue.shift(); 
+    const player2Entry = matchmakingQueue.shift(); 
+
+    if (!player1Entry || !player2Entry) {
+        console.error("Matchmaking: Error dequeuing players.");
+        if (player1Entry) matchmakingQueue.unshift(player1Entry);
+        if (player2Entry) matchmakingQueue.unshift(player2Entry);
+        return;
+    }
+
+    console.log(`Matchmaking: Attempting to match ${player1Entry.name} with ${player2Entry.name}`);
+
+    try {
+      const gameOptions: GameOptions = { 
+        isMatchmaking: true, 
+        isPublic: false, 
+        isRanked: true,
+        pawnsPerPlayer: PAWNS_PER_PLAYER 
+      };
       
-      const player1Entry = matchmakingQueue.shift();
-      const player2Entry = matchmakingQueue.shift();
+      const gameId = await gameStore.createGame(player1Entry.socketId, player1Entry.name, gameOptions);
+      console.log(`Matchmaking: Game ${gameId} created for ${player1Entry.name}. Attempting to add ${player2Entry.name}.`);
+      
+      const joinResult = await gameStore.addPlayerToGame(gameId, player2Entry.socketId, player2Entry.name);
 
-      if (player1Entry && player2Entry) {
-        try {
-          const gameOptions: GameOptions = { 
-            isMatchmaking: true, 
-            isPublic: false, 
-            isRanked: true 
-          };
-          
-          const gameId = await gameStore.createGame(player1Entry.socketId, player1Entry.name, gameOptions);
-          const joinResult = await gameStore.addPlayerToGame(gameId, player2Entry.socketId, player2Entry.name);
+      if (joinResult.success && joinResult.assignedPlayerId === 2 && joinResult.existingPlayers) {
+        console.log(`Matchmaking: Successfully matched ${player1Entry.name} (P1) vs ${player2Entry.name} (P2) in game ${gameId}`);
+        
+        const player1Data = joinResult.existingPlayers.find(p => p.id === player1Entry.socketId);
+        const player2Data = joinResult.existingPlayers.find(p => p.id === player2Entry.socketId);
 
-          if (joinResult.success && joinResult.assignedPlayerId !== undefined) {
-            console.log(`Matchmaking: Matched ${player1Entry.name} vs ${player2Entry.name} in game ${gameId}`);
-            
-            const finalGameData = await gameStore.getGame(gameId);
-            if (!finalGameData) {
-                console.error("Matchmaking: Failed to retrieve game data after match creation for P1.");
-                matchmakingQueue.unshift(player1Entry);
-                matchmakingQueue.unshift(player2Entry);
-                return;
-            }
-
-            const assignedP1Id = finalGameData.players.find(p => p.id === player1Entry.socketId)?.playerId;
-            const assignedP2Id = finalGameData.players.find(p => p.id === player2Entry.socketId)?.playerId;
-
-            if (assignedP1Id) {
-              player1Entry.socket.emit('match_found', { 
-                  gameId, 
-                  opponentName: player2Entry.name, 
-                  assignedPlayerId: assignedP1Id,
-                  timestamp: Date.now()
-              });
-            }
-            if (assignedP2Id) {
-                player2Entry.socket.emit('match_found', { 
-                    gameId, 
-                    opponentName: player1Entry.name, 
-                    assignedPlayerId: assignedP2Id,
-                    timestamp: Date.now()
-                });
-            }
-          } else {
-            console.error(`Matchmaking: Failed to join player ${player2Entry.name} to game ${gameId}. Error: ${joinResult.error}. Re-queuing.`);
-            matchmakingQueue.unshift(player1Entry); 
-            matchmakingQueue.unshift(player2Entry);
-          }
-        } catch (error) {
-          console.error('Matchmaking: Error creating or joining game for matched players:', error);
-          matchmakingQueue.unshift(player1Entry);
-          matchmakingQueue.unshift(player2Entry);
+        if (!player1Data || !player2Data) {
+            console.error("Matchmaking: Could not find player data after successful join. Re-queuing.");
+            matchmakingQueue.unshift(player1Entry, player2Entry);
+            return;
         }
+        
+        player1Entry.socket.emit('match_found', { 
+            gameId, 
+            opponentName: player2Entry.name, 
+            assignedPlayerId: player1Data.playerId, 
+            timestamp: Date.now(),
+            options: gameOptions 
+        });
+        
+        player2Entry.socket.emit('match_found', { 
+            gameId, 
+            opponentName: player1Entry.name, 
+            assignedPlayerId: player2Data.playerId, 
+            timestamp: Date.now(),
+            options: gameOptions 
+        });
+
+      } else {
+        console.error(`Matchmaking: Failed to join ${player2Entry.name} to game ${gameId}. Error: ${joinResult.error}. Re-queuing players.`);
+        matchmakingQueue.unshift(player1Entry, player2Entry); 
       }
+    } catch (error) {
+      console.error('Matchmaking: Critical error during game creation/join for matched players. Re-queuing.', error);
+      if (player1Entry) matchmakingQueue.unshift(player1Entry); 
+      if (player2Entry) matchmakingQueue.unshift(player2Entry);
     }
   }, 5000); 
 
   return () => {
-    if (matchmakingInterval) {
-      clearInterval(matchmakingInterval);
-      matchmakingInterval = null;
-    }
+    if (matchmakingIntervalId) clearInterval(matchmakingIntervalId);
+    matchmakingIntervalId = null;
     matchmakingQueue.length = 0; 
-    console.log('Matchmaking: Stopped and cleared in-memory queue.');
+    console.log('Matchmaking: Processor stopped and queue cleared.');
   };
 }
 
-export function addToMatchmakingQueue(socket: Socket, playerName: string, rating: number = 1000) {
+export function addToMatchmakingQueue(socket: Socket, playerName: string, rating: number = 1000): void {
   if (matchmakingQueue.some(p => p.socketId === socket.id)) {
-    socket.emit('matchmaking_error', { message: 'Already in queue.' });
+    socket.emit('matchmaking_error', { message: 'You are already in the matchmaking queue.' });
     return;
   }
   
@@ -110,29 +123,19 @@ export function addToMatchmakingQueue(socket: Socket, playerName: string, rating
   };
   matchmakingQueue.push(player);
   socket.emit('matchmaking_joined', { 
-    message: 'Added to matchmaking queue.', 
+    message: 'Successfully added to matchmaking queue.', 
     position: matchmakingQueue.length,
     timestamp: Date.now() 
   });
-  console.log(`Matchmaking: ${playerName} (ID: ${socket.id}) added to queue. Queue size: ${matchmakingQueue.length}`);
+  console.log(`Matchmaking: ${playerName} (Socket: ${socket.id}, Rating: ${rating}) added to queue. Queue size: ${matchmakingQueue.length}`);
 }
 
 export function removeFromMatchmakingQueue(socketId: string): boolean {
   const index = matchmakingQueue.findIndex(p => p.socketId === socketId);
   if (index > -1) {
     const removedPlayer = matchmakingQueue.splice(index, 1)[0];
-    if (removedPlayer && removedPlayer.socket && removedPlayer.socket.connected) {
-        removedPlayer.socket.emit('matchmaking_left', { 
-          message: 'Removed from queue by server or disconnect.',
-          timestamp: Date.now()
-        });
-    }
-    console.log(`Matchmaking: Player ${socketId} removed from queue. Queue size: ${matchmakingQueue.length}`);
+    console.log(`Matchmaking: Player ${socketId} (${removedPlayer?.name}) removed from queue. Queue size: ${matchmakingQueue.length}`);
     return true;
   }
   return false;
-}
-
-export function getMatchmakingQueueSize(): number {
-    return matchmakingQueue.length;
 }

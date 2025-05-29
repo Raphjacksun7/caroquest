@@ -24,9 +24,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
   useGameConnection,
-  PlayerInfo,
-  useGameStore,
-} from "@/hooks/useGameConnection"; // Added useGameStore
+  gameStore,
+} from "@/hooks/useGameConnection";
 import { useAI } from "@/hooks/useAI";
 import { WaitingRoom } from "@/components/game/WaitingRoom";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -97,9 +96,6 @@ export default function GamePage() {
       setPlayer2NameLocal(p2Name);
       setLocalGameState(createInitialGameState());
     } else {
-      // const playerName = localStorage.getItem('playerName') || `Player_${Math.random().toString(36).substring(2, 7)}`;
-      // if (!connectedGameId && gameIdFromRoute && isConnected) { // isConnected check ensures socket is ready
-      //    joinGame(gameIdFromRoute, playerName);
       const playerName =
         localStorage.getItem("playerName") ||
         `Player_${Math.random().toString(36).substring(2, 7)}`;
@@ -322,7 +318,7 @@ export default function GamePage() {
             !remoteGameState.blockedPawnsInfo.has(index)
           ) {
             const tempState = highlightValidMoves(remoteGameState, index);
-            useGameStore.getState().setGameState(tempState);
+            gameStore.getState().setGameState(tempState); // Fixed: use gameStore instead of useGameStore
           } else if (
             square.pawn &&
             square.pawn.playerId === remoteLocalPlayerId &&
@@ -337,7 +333,7 @@ export default function GamePage() {
         } else {
           if (remoteGameState.selectedPawnIndex === index) {
             const tempState = clearHighlights(remoteGameState);
-            useGameStore.getState().setGameState(tempState);
+            gameStore.getState().setGameState(tempState); // Fixed: use gameStore instead of useGameStore
           } else {
             const targetSquare = remoteGameState.board[index];
             if (targetSquare.highlight === "validMove") {
@@ -348,10 +344,10 @@ export default function GamePage() {
               !remoteGameState.blockedPawnsInfo.has(index)
             ) {
               const tempState = highlightValidMoves(remoteGameState, index);
-              useGameStore.getState().setGameState(tempState);
+              gameStore.getState().setGameState(tempState); // Fixed: use gameStore instead of useGameStore
             } else {
               const tempState = clearHighlights(remoteGameState);
-              useGameStore.getState().setGameState(tempState);
+              gameStore.getState().setGameState(tempState); // Fixed: use gameStore instead of useGameStore
             }
           }
         }
@@ -406,7 +402,7 @@ export default function GamePage() {
 
       const highlightedState = highlightValidMoves(activeGameState, pawnIndex);
       if (gameMode === "remote")
-        useGameStore.getState().setGameState(highlightedState);
+        gameStore.getState().setGameState(highlightedState); // Fixed: use gameStore instead of useGameStore
       else setLocalGameState(highlightedState);
     },
     [activeGameState, activeLocalPlayerId, remoteLocalPlayerId, gameMode]
@@ -423,7 +419,7 @@ export default function GamePage() {
           // Check if activeGameState is not null
           const clearedState = clearHighlights(activeGameState);
           if (gameMode === "remote")
-            useGameStore.getState().setGameState(clearedState);
+            gameStore.getState().setGameState(clearedState); // Fixed: use gameStore instead of useGameStore
           else setLocalGameState(clearedState);
         }
         return;
@@ -449,7 +445,7 @@ export default function GamePage() {
         });
         const clearedState = clearHighlights(activeGameState);
         if (gameMode === "remote")
-          useGameStore.getState().setGameState(clearedState);
+          gameStore.getState().setGameState(clearedState); // Fixed: use gameStore instead of useGameStore
         else setLocalGameState(clearedState);
       }
     },
