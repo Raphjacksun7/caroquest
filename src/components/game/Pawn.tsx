@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { Pawn as PawnType, GameState } from '@/lib/gameLogic';
@@ -5,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import React from 'react';
 import { Lock, Shield, Zap } from 'lucide-react';
+
 
 interface PawnProps {
   pawn: PawnType;
@@ -38,39 +40,34 @@ export const Pawn = ({
   const isSelected = selectedPawnIndex === squareIndex;
   const isCurrentPlayerPawn = playerId === currentPlayerId;
   
-  const playerColorClass = playerId === 1 
-    ? 'bg-[hsl(var(--player1-pawn-color))] border-[hsl(var(--player1-pawn-color))]' 
-    : 'bg-[hsl(var(--player2-pawn-color))] border-[hsl(var(--player2-pawn-color))]';
+  const playerBgColorStyle: React.CSSProperties = { backgroundColor: `hsl(var(${playerId === 1 ? '--player1-pawn-color' : '--player2-pawn-color'}))` };
   
-  let dynamicBorderClass = 'border-opacity-75'; 
+  let dynamicBorderStyle: React.CSSProperties = { borderColor: `hsla(var(${playerId === 1 ? '--player1-pawn-color' : '--player2-pawn-color'}), 0.75)` };
+  let ringClass = '';
   let animationClass = '';
   let cursorClass = 'cursor-default';
 
   if (isPartOfWinningLine) {
-    dynamicBorderClass = 'border-[hsl(var(--highlight-win-line))] border-4 shadow-lg shadow-[hsl(var(--highlight-win-line))]';
+    dynamicBorderStyle = { borderColor: 'hsl(var(--highlight-win-line-pawn-border))', borderWidth: '3px' }; // Thicker border for win
+    playerBgColorStyle.boxShadow = '0 0 10px hsl(var(--highlight-win-line-pawn-border))'; // Glow effect
     animationClass = 'animate-pulse';
   } else if (isSelected) {
-    dynamicBorderClass = 'border-[hsl(var(--highlight-selected-pawn))] border-4 ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn))]';
+    dynamicBorderStyle = { borderColor: 'hsl(var(--highlight-selected-pawn-border))', borderWidth: '3px' };
+    ringClass = 'ring-2 ring-offset-1 ring-[hsl(var(--highlight-selected-pawn-border))]';
     animationClass = 'scale-105';
-  } else if (isBlocking) { // Blocking takes precedence over creating dead zone for border
-    dynamicBorderClass = 'border-[hsl(var(--highlight-blocking-pawn-border))] border-4';
-  } else if (isCreatingDeadZone) {
-    dynamicBorderClass = 'border-[hsl(var(--highlight-creating-dead-zone-pawn-border))] border-4';
+  } else if (isBlocking) { // This should appear if not creating dead zone but is blocking
+    dynamicBorderStyle = { borderColor: 'hsl(var(--highlight-blocking-pawn-border))', borderWidth: '3px' };
+  } else if (isCreatingDeadZone) { // This takes precedence over just blocking if both are true
+    dynamicBorderStyle = { borderColor: 'hsl(var(--highlight-creating-dead-zone-pawn-border))', borderWidth: '3px' };
   }
 
-  let tooltipContentText = `Player ${playerId} Pawn.`;
+
+  let tooltipContent = `Player ${playerId} Pawn.`;
+  if (isBlocked) tooltipContent = 'This pawn is BLOCKED. It cannot move or be part of a winning diagonal.';
+  else if (isCreatingDeadZone) tooltipContent = 'This pawn is CREATING a DEAD ZONE (marked with × on an adjacent square). It cannot be used in a winning diagonal.';
+  else if (isBlocking) tooltipContent = 'This pawn is BLOCKING an opponent. It cannot be used in a winning diagonal because it is actively blocking.';
   
-  if (isBlocked) {
-    tooltipContentText = 'This pawn is BLOCKED. It cannot move or be part of a winning diagonal.';
-  } else if (isBlocking) {
-    tooltipContentText = 'This pawn is BLOCKING an opponent. It cannot be used in a winning diagonal because it is actively blocking.';
-  } else if (isCreatingDeadZone) { // Tooltip for creating dead zone even if also blocking
-    tooltipContentText = 'This pawn is CREATING a DEAD ZONE. It cannot be used in a winning diagonal. It creates a square (marked with ×) where the opponent cannot place pawns or form winning diagonals through.';
-  }
-  
-  if (isPartOfWinningLine) {
-    tooltipContentText = 'Part of the WINNING line!';
-  }
+  if (isPartOfWinningLine) tooltipContent = 'Part of the WINNING line!';
   
   const isDraggable = isCurrentPlayerPawn && gamePhase === 'movement' && !winner && !isBlocked;
   if (isDraggable) {
@@ -90,7 +87,7 @@ export const Pawn = ({
   };
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -99,8 +96,7 @@ export const Pawn = ({
             onDragEnd={handleDragEnd}
             className={cn(
               'w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-150 border-2 relative',
-              playerColorClass,
-              dynamicBorderClass,
+              ringClass,
               animationClass,
               cursorClass,
               isDraggable && 'hover:scale-110',
@@ -108,24 +104,25 @@ export const Pawn = ({
               !isCurrentPlayerPawn && !winner && 'opacity-80', 
               winner && !isPartOfWinningLine && 'opacity-70' 
             )}
-            aria-label={tooltipContentText}
+            style={{ ...playerBgColorStyle, ...dynamicBorderStyle }}
+            aria-label={tooltipContent}
             role="button"
             tabIndex={isDraggable ? 0 : -1}
-            aria-disabled={isBlocked || (!isCurrentPlayerPawn && !winner)}
           >
-            <div className={cn(
-              "w-6 h-6 md:w-7 md:h-7 rounded-full opacity-30",
-              playerId === 1 ? "bg-red-300" : "bg-blue-300" 
-            )}></div>
+            {/* Inner circle for visual depth, color derived from pawn color but lighter */}
+            <div 
+                className="w-6 h-6 md:w-7 md:h-7 rounded-full opacity-40"
+                style={{ backgroundColor: `hsla(var(${playerId === 1 ? '--player1-pawn-color' : '--player2-pawn-color'}), 0.5)`}}
+            ></div>
             
-            {isBlocked && <Lock className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
-            {!isBlocked && isBlocking && <Shield className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
-            {!isBlocked && !isBlocking && isCreatingDeadZone && <Zap className="w-4 h-4 text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
+            {isBlocked && <Lock size={16} className="w-4 h-4 text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
+            {isCreatingDeadZone && !isBlocked && <Zap size={16} className="w-4 h-4 text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
+            {isBlocking && !isCreatingDeadZone && !isBlocked && <Shield size={16} className="w-4 h-4 text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" />}
           </div>
         </TooltipTrigger>
-        {tooltipContentText && (
+        {tooltipContent && (
           <TooltipContent side="top" align="center" className="bg-popover text-popover-foreground rounded-md px-3 py-1.5 text-sm shadow-md z-50 max-w-xs">
-            <p>{tooltipContentText}</p>
+            <p>{tooltipContent}</p>
           </TooltipContent>
         )}
       </Tooltip>

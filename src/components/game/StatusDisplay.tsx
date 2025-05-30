@@ -10,9 +10,11 @@ import { useTranslation } from '@/hooks/useTranslation';
 
 interface StatusDisplayProps {
   gameState: GameState;
+  player1Name: string;
+  player2Name: string;
 }
 
-export const StatusDisplay = ({ gameState }: StatusDisplayProps) => {
+export const StatusDisplay = ({ gameState, player1Name, player2Name }: StatusDisplayProps) => {
   const { t } = useTranslation();
   const { gamePhase, currentPlayerId, winner, selectedPawnIndex, board, playerColors } = gameState;
 
@@ -20,17 +22,19 @@ export const StatusDisplay = ({ gameState }: StatusDisplayProps) => {
   let statusDescription = '';
   let IconComponent = Hourglass;
 
+  const getPlayerDisplayName = (id: PlayerId) => {
+    return id === 1 ? player1Name : player2Name;
+  };
+
   if (winner) {
-    statusText = t('statusPlayerWins', { winner });
+    statusText = t('statusPlayerWins', { winner: getPlayerDisplayName(winner) });
     statusDescription = t('statusCongratulations');
     IconComponent = Flag;
   } else {
+    const currentPlayerName = getPlayerDisplayName(currentPlayerId);
     const playerColorEnum = playerColors[currentPlayerId];
-    const playerColorName = playerColorEnum === 'light' 
-        ? `${t('redPawns')} (${t('lightSquares')})` 
-        : `${t('bluePawns')} (${t('darkSquares')})`;
-
-    statusText = t('statusPlayerTurn', { currentPlayerId, playerColorName });
+    // Removed playerColorName logic for pawn color as it's implicit by player
+    statusText = t('statusPlayerTurnSimple', { playerName: currentPlayerName });
     IconComponent = Swords;
 
     switch (gamePhase) {
@@ -38,7 +42,7 @@ export const StatusDisplay = ({ gameState }: StatusDisplayProps) => {
         statusDescription = t('statusPlacementPhase');
         break;
       case 'movement':
-        if (selectedPawnIndex !== null) {
+        if (selectedPawnIndex !== null && board[selectedPawnIndex]) { // Check if board[selectedPawnIndex] exists
           const selectedSquare = board[selectedPawnIndex];
           const coord = `${String.fromCharCode(97 + selectedSquare.col)}${BOARD_SIZE - selectedSquare.row}`;
           statusDescription = t('statusMovementPhaseSelected', { coord });
@@ -67,3 +71,4 @@ export const StatusDisplay = ({ gameState }: StatusDisplayProps) => {
     </div>
   );
 };
+

@@ -1,22 +1,22 @@
 
 "use client";
 
-import type { PlayerId, GameState } from '@/lib/gameLogic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
+import { GameState, PlayerId } from '@/lib/types';
 
 interface PlayerCardProps {
   playerId: PlayerId;
+  playerName: string; // Added playerName
+  isLocalPlayer: boolean; // Added to indicate if this card represents the local player
   gameState: GameState;
 }
 
-export const PlayerCard = ({ playerId, gameState }: PlayerCardProps) => {
+export const PlayerCard = ({ playerId, playerName, isLocalPlayer, gameState }: PlayerCardProps) => {
   const { t } = useTranslation();
   const { currentPlayerId, playerColors, pawnsToPlace, placedPawns, gamePhase, winner } = gameState;
-
-  const playerName = t('player', { id: playerId });
   
   const playerAssignedColorName = playerColors[playerId] === 'light' 
     ? t('lightSquares') 
@@ -25,7 +25,7 @@ export const PlayerCard = ({ playerId, gameState }: PlayerCardProps) => {
   const playerPawnColorName = playerId === 1 ? t('redPawns') : t('bluePawns');
 
   const playerPawnColorVar = playerId === 1 ? '--player1-pawn-color' : '--player2-pawn-color';
-  const isCurrent = currentPlayerId === playerId && !winner;
+  const isCurrentTurn = currentPlayerId === playerId && !winner;
   
   const pawnsInfo = gamePhase === 'placement' 
     ? t('pawnsToPlace', { count: pawnsToPlace[playerId] })
@@ -34,7 +34,7 @@ export const PlayerCard = ({ playerId, gameState }: PlayerCardProps) => {
   return (
     <Card className={cn(
         "shadow-lg transition-all duration-300", 
-        isCurrent ? 'ring-4 ring-offset-2 ring-[hsl(var(--primary))] shadow-primary/30' : 'ring-1 ring-border',
+        isCurrentTurn ? 'ring-4 ring-offset-2 ring-[hsl(var(--primary))] shadow-primary/30' : 'ring-1 ring-border',
         winner === playerId ? 'bg-green-50 border-[hsl(var(--highlight-win-line))]' : '',
         winner && winner !== playerId ? 'opacity-70' : ''
       )}>
@@ -45,9 +45,9 @@ export const PlayerCard = ({ playerId, gameState }: PlayerCardProps) => {
               className="w-6 h-6 rounded-full shadow-inner"
               style={{ backgroundColor: `hsl(var(${playerPawnColorVar}))` }}
             ></div>
-            {playerName} ({playerPawnColorName})
+            {playerName} {isLocalPlayer && `(${t('you')})`} ({playerPawnColorName})
           </div>
-          {isCurrent && (
+          {isCurrentTurn && (
             <Badge variant="outline" className="border-[hsl(var(--primary))] text-[hsl(var(--primary))] animate-pulse px-3 py-1 text-xs">
               {t('yourTurn')}
             </Badge>
