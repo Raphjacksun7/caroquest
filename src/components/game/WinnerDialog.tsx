@@ -1,16 +1,16 @@
 
 "use client";
 
-import type { PlayerId } from '@/lib/gameLogic';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card'; 
 import { Award } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { PlayerId } from '@/lib/types';
 
 interface WinnerDialogProps {
   winner: PlayerId | null;
-  winnerName: string; 
+  winnerName: string; // Added winnerName
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onPlayAgain: () => void;
@@ -22,6 +22,7 @@ export const WinnerDialog = ({ winner, winnerName, isOpen, onOpenChange, onPlayA
   if (!isOpen || !winner) return null;
 
   const winnerColorVar = winner === 1 ? '--player1-pawn-color' : '--player2-pawn-color';
+  // const playerPawnColorName = winner === 1 ? t('redPawns') : t('bluePawns'); // Use winnerName directly
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -46,4 +47,3 @@ export const WinnerDialog = ({ winner, winnerName, isOpen, onOpenChange, onPlayA
     </Dialog>
   );
 };
-

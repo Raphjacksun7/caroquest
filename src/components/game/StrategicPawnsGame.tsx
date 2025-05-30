@@ -5,8 +5,6 @@ import type {
   GameState,
   GameMode,
   AIDifficulty,
-  PlayerId,
-  StoredPlayer,
 } from "@/lib/types";
 import {
   createInitialGameState,
@@ -60,7 +58,7 @@ import { useGameConnection, gameStore } from "@/hooks/useGameConnection";
 import { useAI } from "@/hooks/useAI";
 import { useRouter, useParams } from "next/navigation";
 
-// Sub-component for the game mode selection screen
+// Sub-component for the game mode selection screen 
 interface SelectGameModeScreenProps {
   onStartGameMode: (mode: GameMode) => void;
   player1Name: string;

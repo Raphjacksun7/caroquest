@@ -1,16 +1,16 @@
 
 "use client";
 
-import type { PlayerId, GameState } from '@/lib/gameLogic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
+import { GameState, PlayerId } from '@/lib/types';
 
 interface PlayerCardProps {
   playerId: PlayerId;
-  playerName: string; 
-  isLocalPlayer: boolean; 
+  playerName: string; // Added playerName
+  isLocalPlayer: boolean; // Added to indicate if this card represents the local player
   gameState: GameState;
 }
 
