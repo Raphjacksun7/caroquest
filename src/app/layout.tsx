@@ -12,7 +12,7 @@ const fontSans = Inter({
 
 // Default metadata. Specific pages can override this or use dynamic metadata.
 export const metadata: Metadata = {
-  title: 'Diagonal Domination', // Default title
+  title: 'CaroQuest', // Default title
   description: 'A strategic board game of diagonal alignment and blocking.', // Default description
 };
 

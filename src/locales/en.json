@@ -1,5 +1,5 @@
 {
-  "diagonalDomination": "Diagonal Domination",
+  "diagonalDomination": "CaroQuest",
   "pageDescription": "A strategic board game of diagonal alignment and blocking.",
   "playerWins": "Player {{winner}} Wins!",
   "playerDynamicWins": "{{playerName}} Wins!",
@@ -36,7 +36,7 @@
   "playerPlacedAt": "Player {{id}} placed at {{coord}}",
   "playerMovedFromTo": "Player {{id}} moved from {{fromCoord}} to {{toCoord}}",
   "gameRulesTitle": "Game Rules",
-  "learnHowToPlay": "Learn how to play Diagonal Domination.",
+  "learnHowToPlay": "Learn how to play CaroQuest.",
   "rulesBasics": "Basics",
   "rulesBlocking": "Blocking",
   "rulesWinning": "Winning",

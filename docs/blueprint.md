@@ -1,4 +1,4 @@
-# **App Name**: Diagonal Domination
+# **App Name**: CaroQuest
 
 ## Core Features:
 
