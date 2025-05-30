@@ -1,6 +1,4 @@
-
-import type { PlayerId } from '@/lib/gameLogic';
-
+import { PlayerId } from "@/lib/types";
 export interface PlayerInfo {
   id: string; // Socket ID for remote, or a local unique ID ('local1', 'local2')
   name: string;
