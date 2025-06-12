@@ -1,11 +1,11 @@
 "use client";
 
-import type { SquareState, GameState } from '@/lib/gameLogic';
 import { Pawn } from './Pawn';
 import { cn } from '@/lib/utils';
 import React from 'react';
 import { BOARD_SIZE } from '@/lib/gameLogic';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { GameState, SquareState } from '@/lib/types';
 
 interface SquareProps {
   squareState: SquareState;

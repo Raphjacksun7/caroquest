@@ -129,3 +129,6 @@ export type GameMode = "ai" | "local" | "remote" | "select";
  * Defines the difficulty levels for the AI opponent.
  */
 export type AIDifficulty = "easy" | "medium" | "hard";
+
+
+export type Locale = 'en' | 'fr'; // Extend this as needed for more languages

@@ -1,9 +1,8 @@
 "use client";
-
-import type { GameState, SquareState } from '@/lib/gameLogic';
 import { Square } from './Square';
 import { BOARD_SIZE } from '@/lib/gameLogic';
-import React from 'react'; // Removed useState, useEffect as they weren't used here
+import { GameState, SquareState } from '@/lib/types';
+import React from 'react'; 
 
 interface GameBoardProps {
   gameState: GameState;

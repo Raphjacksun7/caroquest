@@ -1,11 +1,11 @@
 
 "use client";
 
-import type { GameState } from '@/lib/gameLogic';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { History } from 'lucide-react';
 import { BOARD_SIZE } from '@/lib/gameLogic';
 import { useTranslation } from '@/hooks/useTranslation';
+import { GameState } from '@/lib/types';
 
 interface HistoryCardProps {
   gameState: GameState;
