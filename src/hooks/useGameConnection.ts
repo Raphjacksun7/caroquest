@@ -324,8 +324,6 @@ export function useGameConnection() {
   const gameId = useGameStore((state) => state.gameId);
   const isConnectedState = useGameStore((state) => state.isConnected);
 
-  // const socketUrl = useMemo(() => process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== "undefined" ? window.location.origin : ""), []);
-
   const socketServerUrl = useMemo(() => {
     const serverUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
     if (serverUrl) return serverUrl;

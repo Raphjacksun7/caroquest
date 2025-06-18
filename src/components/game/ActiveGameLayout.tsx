@@ -1,14 +1,14 @@
 "use client";
 
-import React from 'react';
+import React, { useState } from "react";
 import type { GameState, GameMode, PlayerId, Locale } from "@/lib/types";
 import { GameBoard } from "@/components/game/GameBoard";
-import { SidePanel } from './SidePanel';
-import { IconToolbar } from './IconToolbar';
-import { Loader2 } from "lucide-react";
-import { StatusDisplay } from "@/components/game/StatusDisplay";
+import { SidePanel } from "./SidePanel";
+import { IconToolbar } from "./IconToolbar";
+import { Loader2, Smartphone, X } from "lucide-react";
+import { Alert, AlertDescription } from "../ui/alert";
+import { Button } from "../ui/button";
 
-// The props interface remains the same
 interface ActiveGameLayoutProps {
   gameState: GameState | null;
   gameMode: GameMode;
@@ -34,11 +34,10 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
   onSquareClick,
   onPawnDragStart,
   onPawnDrop,
-  player1Name, // Destructure all props for clarity
+  player1Name,
   player2Name,
   ...rest
 }) => {
-
   if (!gameState) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -47,21 +46,37 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
     );
   }
 
-  return (
-    // This is the main page container. It's now a flex-col on mobile
-    // and a flex-row on large screens.
-    <div className="flex flex-col lg:flex-row items-stretch min-h-screen w-full bg-background text-foreground p-2 sm:p-4 gap-4">
-      
-      {/* Vertical Icon Toolbar: on the Left for large screens */}
-      <div className="hidden lg:flex flex-shrink-0">
-        <IconToolbar {...rest} />
-      </div>
+  const [showMobileAlert, setShowMobileAlert] = useState(true);
 
+  const MobileAlert = () => (
+    <div className="lg:hidden p-4">
+      {showMobileAlert && (
+        <Alert className="border-orange-200 bg-orange-50">
+          <Smartphone className="h-4 w-4 text-orange-600" />
+          <AlertDescription className="text-orange-800 pr-8">
+            We don't support full functionality on mobile web yet. Use laptop
+            for full experience.
+          </AlertDescription>
+          <Button
+            variant="outline"
+            size="sm"
+            className="absolute right-2 top-2 h-6 w-6 p-0 text-orange-600 hover:bg-orange-100"
+            onClick={() => setShowMobileAlert(false)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </Alert>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col lg:flex-row items-stretch min-h-screen w-full bg-background text-foreground p-2 sm:p-4 gap-4">
+      <MobileAlert />
       {/* Main Game Board Area */}
-      <main className="flex-grow flex flex-col items-center justify-center w-full lg:w-auto p-0 lg:py-4">
-        
+      <main className="flex-grow flex flex-col items-center justify-center w-full lg:w-auto p-4 lg:p-8">
         {/* Scalable Game Board Wrapper */}
-        <div className="relative w-full max-w-[500px] lg:max-w-none lg:h-full lg:flex-grow aspect-square">
+        <div className="relative w-full h-full max-w-[min(500px,calc(100vw-2rem))] max-h-[min(500px,calc(100vh-8rem))] lg:max-w-[min(600px,calc(100vw-24rem))] lg:max-h-[min(600px,calc(100vh-4rem))] xl:max-w-[min(700px,calc(100vw-28rem))] xl:max-h-[min(700px,calc(100vh-4rem))] aspect-square flex items-center justify-center">
           <GameBoard
             gameState={gameState}
             onSquareClick={onSquareClick}
@@ -76,22 +91,24 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
         </div>
       </main>
 
-      {/* Side Panel: on the Right for large screens */}
+      {/* Side Panel: Desktop version OR Mobile alert */}
       <div className="w-full lg:w-auto lg:flex-shrink-0">
-          <SidePanel 
-            gameState={gameState}
-            player1Name={player1Name}
-            player2Name={player2Name}
-            gameMode={rest.gameMode}
-            localPlayerId={rest.localPlayerId}
-            connectedGameId={rest.connectedGameId}
-            onCopyGameLink={rest.onCopyGameLink}
-          />
+        <SidePanel
+          gameState={gameState}
+          player1Name={player1Name}
+          player2Name={player2Name}
+          gameMode={rest.gameMode}
+          localPlayerId={rest.localPlayerId}
+          connectedGameId={rest.connectedGameId}
+          onCopyGameLink={rest.onCopyGameLink}
+          onResetGame={rest.onResetGame}
+          onOpenRules={rest.onOpenRules}
+        />
       </div>
 
       {/* Icon Toolbar for Mobile: at the bottom of the screen */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-sm border-t border-border p-1">
-         <IconToolbar {...rest} />
+        <IconToolbar {...rest} />
       </div>
     </div>
   );

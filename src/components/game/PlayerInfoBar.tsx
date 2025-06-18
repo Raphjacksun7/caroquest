@@ -1,10 +1,8 @@
 "use client";
 
+import React from "react";
 import type { GameState, PlayerId } from "@/lib/types";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { CircleSmall } from 'lucide-react';
 
-// FIX: The props interface is now corrected to accept individual properties.
 interface PlayerInfoBarProps {
   playerName: string;
   playerId: PlayerId;
@@ -13,39 +11,63 @@ interface PlayerInfoBarProps {
   gameState: GameState;
 }
 
-export const PlayerInfoBar: React.FC<PlayerInfoBarProps> = ({ 
-  playerName, 
-  playerId, 
-  isOpponent, 
-  isCurrentTurn, 
-  gameState 
+export const PlayerInfoBar: React.FC<PlayerInfoBarProps> = ({
+  playerName,
+  playerId,
+  gameState,
 }) => {
-  const pawnsToPlace = gameState.gamePhase === 'placement' ? gameState.pawnsToPlace[playerId] : 0;
-  const playerColorName = playerId === 1 ? 'Red' : 'Blue';
-  const playerColorClass = playerId === 1 ? 'text-red-500' : 'text-blue-500';
-  
-  return (
-    <div className={`w-full max-w-2xl p-3 bg-card/50 rounded-lg transition-all duration-300 ${isCurrentTurn ? 'ring-2 ring-primary shadow-lg' : 'opacity-70'}`}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={`https://api.dicebear.com/8.x/bottts/svg?seed=${playerName}`} alt={playerName} />
-            <AvatarFallback>{playerName.substring(0, 2).toUpperCase()}</AvatarFallback>
-          </Avatar>
-          <div>
-            <p className="font-bold text-lg text-foreground">{playerName} {!isOpponent && '(You)'}</p>
-            <p className={`text-sm font-medium ${playerColorClass}`}>{playerColorName}</p>
-          </div>
-        </div>
+  const pawnsPlaced = gameState.board.filter(
+    (square) => square.pawn?.playerId === playerId
+  ).length;
 
-        {gameState.gamePhase === 'placement' && (
-          <div className="flex items-center gap-2 text-foreground">
-            <CircleSmall className="h-5 w-5" />
-            <span className="font-mono text-lg font-semibold">{pawnsToPlace}</span>
-            <span className="text-sm text-muted-foreground">to place</span>
-          </div>
-        )}
+  const pawnsToPlace =
+    gameState.gamePhase === "placement" ? 6 - pawnsPlaced : 0;
+
+  const TinyPawn = () => {
+    const playerBgColorStyle: React.CSSProperties = {
+      backgroundColor: `hsl(var(${
+        playerId === 1 ? "--player1-pawn-color" : "--player2-pawn-color"
+      }))`,
+    };
+
+    const dynamicBorderStyle: React.CSSProperties = {
+      borderColor: `hsla(var(${
+        playerId === 1 ? "--player1-pawn-color" : "--player2-pawn-color"
+      }), 0.75)`,
+    };
+
+    return (
+      <div
+        className="w-5 h-5 rounded-full flex items-center justify-center shadow-sm border border-opacity-75 aspect-square"
+        style={{ ...playerBgColorStyle, ...dynamicBorderStyle }}
+      >
+        <div
+          className="w-3 h-3 rounded-full opacity-40 aspect-square"
+          style={{
+            backgroundColor: `hsla(var(${
+              playerId === 1 ? "--player1-pawn-color" : "--player2-pawn-color"
+            }), 0.5)`,
+          }}
+        ></div>
       </div>
+    );
+  };
+
+  return (
+    <div className="py-4">
+      {/* Player Name with Tiny Pawn */}
+      <div className="flex items-center gap-3 mb-1">
+        <TinyPawn />
+        <h2 className="text-xl font-semibold text-gray-900">{playerName}</h2>
+      </div>
+
+      <p className="text-sm text-gray-500 ml-8">
+        {gameState.gamePhase === "placement" && (
+          <span className="text-[#555758] text-sm">
+            Left {pawnsToPlace} to place
+          </span>
+        )}
+      </p>
     </div>
   );
 };

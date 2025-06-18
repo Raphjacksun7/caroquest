@@ -103,8 +103,8 @@ export const Square = ({
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       className={cn(
-        'w-14 h-14 md:w-[calc(3.75rem-2px)] md:h-[calc(3.75rem-2px)] flex items-center justify-center border border-[hsla(var(--foreground),0.08)] transition-all duration-150 relative overflow-hidden focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))] group/square',
-        baseBgClass, // Base background color class
+        'w-full h-full flex items-center justify-center border-[hsla(var(--foreground),0.08)] transition-all duration-150 relative overflow-hidden focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))] group/square aspect-square',
+        baseBgClass, 
         conditionalClasses,
         cursorClass,
         hoverInteractionClasses,

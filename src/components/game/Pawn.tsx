@@ -131,7 +131,7 @@ export const Pawn = ({
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             className={cn(
-              "w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-150 border-2 relative",
+              "w-[70%] h-[70%] rounded-full flex items-center justify-center shadow-lg transition-all duration-150 border-2 relative aspect-square",
               ringClass,
               animationClass,
               cursorClass,
@@ -147,7 +147,7 @@ export const Pawn = ({
           >
             {/* Inner circle for visual depth, color derived from pawn color but lighter */}
             <div
-              className="w-6 h-6 md:w-7 md:h-7 rounded-full opacity-40"
+              className="w-[60%] h-[60%] rounded-full opacity-40 aspect-square"
               style={{
                 backgroundColor: `hsla(var(${
                   playerId === 1
@@ -159,20 +159,17 @@ export const Pawn = ({
 
             {isBlocked && (
               <Lock
-                size={16}
-                className="w-4 h-4 text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                className="w-[35%] h-[35%] text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
               />
             )}
             {isCreatingDeadZone && !isBlocked && (
               <Zap
-                size={16}
-                className="w-4 h-4 text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                className="w-[35%] h-[35%] text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
               />
             )}
             {isBlocking && !isCreatingDeadZone && !isBlocked && (
               <Shield
-                size={16}
-                className="w-4 h-4 text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                className="w-[35%] h-[35%] text-[hsl(var(--highlight-blocked-pawn-icon))] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
               />
             )}
           </div>
