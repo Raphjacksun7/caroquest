@@ -123,7 +123,7 @@
   "loadingGame": "Chargement de l'état du jeu...",
   "featureNotAvailableRemote": "Cette fonctionnalité n'est pas encore disponible pour les parties à distance.",
   "player2NameRequired": "Le nom du Joueur 2 est requis pour le mode multijoueur local.",
-  "aiOpponent": "Adversaire IA",
+  "aiOpponent": "Logiciel",
   "gameModeLocal": "Deux Joueurs (Local)",
   "gameModeAI": "Joueur vs IA",
   "gameModeRemote": "Multijoueur à Distance",
@@ -147,5 +147,6 @@
   "easy": "Facile",
   "medium": "Moyen",
   "hard": "Difficile",
-  "gameSetup": "Configuration du Jeu"
+  "gameSetup": "Configuration du Jeu",
+  "home":"Acceuil"
 }

@@ -132,3 +132,53 @@ export type AIDifficulty = "easy" | "medium" | "hard";
 
 
 export type Locale = 'en' | 'fr'; // Extend this as needed for more languages
+
+
+// Enhanced types for the dynamic info system
+export interface InfoAction {
+  label: string;
+  onClick: () => void;
+  variant?: "default" | "outline" | "ghost" | "destructive" | "secondary";
+  disabled?: boolean;
+  loading?: boolean;
+}
+
+export type InfoType = 
+  | "turn"          // Current player's turn
+  | "winner"        // Game winner announcement
+  | "request"       // Rematch/game requests
+  | "error"         // Error messages
+  | "info"          // General information
+  | "success"       // Success messages
+  | "warning"       // Warning messages
+  | "waiting"       // Waiting states
+  | "connection"    // Connection status
+  | "notification"; // General notifications
+
+export interface InfoBoxData {
+  id: string;
+  type: InfoType;
+  message: string;
+  actions?: InfoAction[];
+  duration?: number;        // Auto-dismiss after X ms
+  persistent?: boolean;     // Don't auto-dismiss even with duration
+  dismissible?: boolean;    // Can be manually dismissed
+  onDismiss?: () => void;   // Callback when dismissed
+  priority?: number;        // Higher priority shows first (default: 0)
+  icon?: React.ComponentType<{ className?: string }>; // Optional icon component
+  metadata?: Record<string, any>; // Additional data for complex scenarios
+}
+
+export interface UseInfoSystemReturn {
+  infos: InfoBoxData[];
+  addInfo: (info: Omit<InfoBoxData, "id">) => string;
+  removeInfo: (id: string) => void;
+  clearInfos: () => void;
+  clearInfosByType: (type: InfoType) => void;
+  updateInfo: (id: string, updates: Partial<InfoBoxData>) => void;
+  hasInfoOfType: (type: InfoType) => boolean;
+  getInfosByType: (type: InfoType) => InfoBoxData[];
+  getInfoById: (id: string) => InfoBoxData | undefined;
+  replaceInfo: (type: InfoType, info: Omit<InfoBoxData, "id">) => string;
+  addTemporaryInfo: (info: Omit<InfoBoxData, "id" | "duration">, duration: number) => string;
+}

@@ -123,7 +123,7 @@
   "loadingGame": "Loading game state...",
   "featureNotAvailableRemote": "This feature is not available for remote games yet.",
   "player2NameRequired": "Player 2 name is required for local multiplayer.",
-  "aiOpponent": "AI Opponent",
+  "aiOpponent": "Wizard",
   "gameModeLocal": "Local Two-Player",
   "gameModeAI": "Player vs AI",
   "gameModeRemote": "Remote Multiplayer",
@@ -147,5 +147,6 @@
   "easy": "Easy",
   "medium": "Medium",
   "hard": "Hard",
-  "gameSetup": "Game Setup"
+  "gameSetup": "Game Setup",
+  "home": "Home"
 }

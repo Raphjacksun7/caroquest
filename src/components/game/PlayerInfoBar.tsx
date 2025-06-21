@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import type { GameState, PlayerId } from "@/lib/types";
+import type { GameState, PlayerId, GameMode } from "@/lib/types";
 
 interface PlayerInfoBarProps {
   playerName: string;
@@ -9,12 +9,16 @@ interface PlayerInfoBarProps {
   isOpponent: boolean;
   isCurrentTurn: boolean;
   gameState: GameState;
+  gameMode?: GameMode; // NEW: Add gameMode prop
 }
 
 export const PlayerInfoBar: React.FC<PlayerInfoBarProps> = ({
   playerName,
   playerId,
   gameState,
+  isCurrentTurn,
+  isOpponent,
+  gameMode,
 }) => {
   const pawnsPlaced = gameState.board.filter(
     (square) => square.pawn?.playerId === playerId
@@ -22,6 +26,9 @@ export const PlayerInfoBar: React.FC<PlayerInfoBarProps> = ({
 
   const pawnsToPlace =
     gameState.gamePhase === "placement" ? 6 - pawnsPlaced : 0;
+
+  const hasWinner = !!gameState.winner;
+  const isAIOpponent = gameMode === "ai";
 
   const TinyPawn = () => {
     const playerBgColorStyle: React.CSSProperties = {
@@ -62,10 +69,14 @@ export const PlayerInfoBar: React.FC<PlayerInfoBarProps> = ({
       </div>
 
       <p className="text-sm text-gray-500 ml-8">
-        {gameState.gamePhase === "placement" && (
-          <span className="text-[#555758] text-sm">
-            Left {pawnsToPlace} to place
-          </span>
+        {!hasWinner && isCurrentTurn && isOpponent && isAIOpponent ? (
+          <span className="text-[#555758] text-sm">Thinking...</span>
+        ) : (
+          gameState.gamePhase === "placement" && (
+            <span className="text-[#555758] text-sm">
+              Left {pawnsToPlace} to place
+            </span>
+          )
         )}
       </p>
     </div>

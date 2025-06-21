@@ -22,12 +22,12 @@ interface GameExpiredModalProps {
   gameId?: string;
 }
 
-export function GameExpiredModal({ 
-  isOpen, 
-  onCreateNew, 
-  onGoHome, 
+export function GameExpiredModal({
+  isOpen,
+  onCreateNew,
+  onGoHome,
   errorType = "GAME_NOT_FOUND",
-  gameId 
+  gameId,
 }: GameExpiredModalProps) {
   const { t } = useTranslation();
 
@@ -36,25 +36,31 @@ export function GameExpiredModal({
       case "GAME_NOT_FOUND":
         return {
           title: "Game Session Expired",
-          description: `The game session ${gameId ? `"${gameId}"` : "you're looking for"} has expired or no longer exists. This can happen when a game has been inactive for more than 24 hours.`,
+          description: `The game session ${
+            gameId ? `"${gameId}"` : "you're looking for"
+          } has expired or no longer exists. This can happen when a game has been inactive for more than 24 hours.`,
           icon: <AlertTriangle className="h-6 w-6 text-amber-500" />,
         };
       case "GAME_FULL":
         return {
           title: "Game is Full",
-          description: `The game session ${gameId ? `"${gameId}"` : ""} already has 2 players and cannot accept more participants.`,
+          description: `The game session ${
+            gameId ? `"${gameId}"` : ""
+          } already has 2 players and cannot accept more participants.`,
           icon: <AlertTriangle className="h-6 w-6 text-blue-500" />,
         };
       case "JOIN_FAILED":
         return {
           title: "Unable to Join Game",
-          description: "There was an issue joining the game session. The session may be full or no longer available.",
+          description:
+            "There was an issue joining the game session. The session may be full or no longer available.",
           icon: <AlertTriangle className="h-6 w-6 text-red-500" />,
         };
       case "SERVER_ERROR":
         return {
           title: "Connection Error",
-          description: "A server error occurred while trying to access the game. Please try again in a moment.",
+          description:
+            "A server error occurred while trying to access the game. Please try again in a moment.",
           icon: <AlertTriangle className="h-6 w-6 text-red-500" />,
         };
       default:
@@ -82,7 +88,7 @@ export function GameExpiredModal({
             {description}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        
+
         <AlertDialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-3">
           <Button
             variant="outline"

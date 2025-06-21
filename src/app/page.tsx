@@ -2,15 +2,16 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type { GameMode } from "@/lib/types";
-import { PAWNS_PER_PLAYER, createInitialGameState, highlightValidMoves, clearHighlights } from "@/lib/gameLogic";
+import {
+  PAWNS_PER_PLAYER,
+  highlightValidMoves,
+  clearHighlights,
+} from "@/lib/gameLogic";
 
 // UI Components
 import { GameViewRouter } from "@/components/game/GameViewRouter";
 import { RulesDialogContent } from "@/components/game/RulesDialog";
-import { WinnerDialog } from "@/components/game/WinnerDialog";
 import { GameExpiredModal } from "@/components/game/GameExpiredModal";
-import { Toaster } from "@/components/ui/toaster";
-import { useToast } from "@/hooks/use-toast";
 import { Dialog } from "@/components/ui/dialog";
 import { useParams } from "next/navigation";
 
@@ -24,58 +25,181 @@ import { useGameSetup } from "@/hooks/useGameSetup";
 function CaroQuestPage() {
   const pathParams = useParams();
   const [gameMode, setGameMode] = useState<GameMode>("select");
+  const [isRematchInProgress, setIsRematchInProgress] = useState(false);
+  const [isProcessingSharedLink, setIsProcessingSharedLink] = useState(false);
 
   const gameIdFromUrl = useMemo(() => {
-    const id = Array.isArray(pathParams?.gameId) ? pathParams.gameId[0] : pathParams?.gameId;
+    const id = Array.isArray(pathParams?.gameId)
+      ? pathParams.gameId[0]
+      : pathParams?.gameId;
     return id && id !== "local" && id !== "ai" ? id : "";
   }, [pathParams]);
 
   const {
-    player1NameLocal, setPlayer1NameLocal,
-    player2NameLocal, setPlayer2NameLocal,
-    remotePlayerNameInput, setRemotePlayerNameInput,
-    remoteGameIdInput, setRemoteGameIdInput,
-    currentAiDifficulty, setCurrentAiDifficulty,
+    player1NameLocal,
+    setPlayer1NameLocal,
+    player2NameLocal,
+    setPlayer2NameLocal,
+    remotePlayerNameInput,
+    setRemotePlayerNameInput,
+    remoteGameIdInput,
+    setRemoteGameIdInput,
+    currentAiDifficulty,
+    setCurrentAiDifficulty,
   } = useGameSetup({ gameIdFromUrl });
 
   const { t, currentLanguage, setLanguage } = useTranslation();
-  const { toast } = useToast();
+  const [showGameExpiredModal, setShowGameExpiredModal] = useState(false);
 
-  // Initial options for local game, can be updated later if game settings are introduced
-  const initialGameOptions = useMemo(() => ({ pawnsPerPlayer: PAWNS_PER_PLAYER }), []);
+  // Initial options for local game
+  const initialGameOptions = useMemo(
+    () => ({ pawnsPerPlayer: PAWNS_PER_PLAYER }),
+    []
+  );
 
   const {
-    localGameState, isAILoading, handleLocalSquareClick,
-    handleLocalPawnDragStart, handleLocalPawnDrop, resetLocalGame,
-    setLocalGameState, // Added for initial options if needed
-  } = useLocalGame({ aiDifficulty: currentAiDifficulty, gameMode, initialOptions: initialGameOptions });
+    localGameState,
+    isAILoading,
+    handleLocalSquareClick,
+    handleLocalPawnDragStart,
+    handleLocalPawnDrop,
+    resetLocalGame,
+  } = useLocalGame({
+    aiDifficulty: currentAiDifficulty,
+    gameMode,
+    initialOptions: initialGameOptions,
+  });
 
   const gameConnection = useGameConnection();
-
   const [isRulesOpen, setIsRulesOpen] = useState(false);
-  const [showGameExpiredModal, setShowGameExpiredModal] = useState(false);
 
   useGameUrlManager(gameMode, gameConnection.gameId);
 
-  // Effect for handling game connection errors
+  // Handle errors
   useEffect(() => {
-    if (gameConnection.error && gameConnection.errorType) {
-      console.log("CLIENT: Game Connection Error received:", { error: gameConnection.error, type: gameConnection.errorType });
-      if (["GAME_NOT_FOUND", "GAME_FULL", "JOIN_FAILED", "SERVER_ERROR"].includes(gameConnection.errorType)) {
+    if (
+      gameConnection.error &&
+      gameConnection.errorType &&
+      !isRematchInProgress
+    ) {
+      console.log("CLIENT: Game Connection Error received:", {
+        error: gameConnection.error,
+        type: gameConnection.errorType,
+        isRematchInProgress,
+      });
+
+      // Only show modals for critical errors when not in rematch
+      if (
+        ["GAME_NOT_FOUND", "GAME_FULL", "JOIN_FAILED"].includes(
+          gameConnection.errorType
+        ) &&
+        !isRematchInProgress
+      ) {
         setShowGameExpiredModal(true);
-      } else {
-        toast({ title: t("errorTitle"), description: gameConnection.error, variant: "destructive" });
       }
     }
-  }, [gameConnection.error, gameConnection.errorType, toast, t]);
+  }, [gameConnection.error, gameConnection.errorType, isRematchInProgress]);
 
-  // URL detection effect (original had a console.log, can be expanded if auto-join is desired)
-   useEffect(() => {
-    if (gameIdFromUrl && gameMode === "select" && !gameConnection.isConnecting && !gameConnection.gameId && !gameConnection.isConnected) {
-      console.log("CLIENT: URL detected with gameId:", gameIdFromUrl, "Ready for remote join if user initiates.");
-      // If auto-join on load is desired, logic could go here, but usually requires user interaction.
+  // Handle game mode changes
+  useEffect(() => {
+    if (isRematchInProgress) {
+      console.log(
+        "CLIENT: Rematch in progress - maintaining current game mode"
+      );
+      return;
     }
-  }, [gameIdFromUrl, gameMode, gameConnection.isConnecting, gameConnection.gameId, gameConnection.isConnected]);
+
+    if (
+      gameConnection.gameId &&
+      gameConnection.isConnected &&
+      gameMode !== "remote"
+    ) {
+      console.log(
+        "CLIENT: Detected active remote game, setting gameMode to 'remote'."
+      );
+      setGameMode("remote");
+    }
+  }, [
+    gameConnection.gameId,
+    gameConnection.isConnected,
+    gameMode,
+    isRematchInProgress,
+  ]);
+
+  // Handle rematch events
+  useEffect(() => {
+    if (gameMode === "remote") {
+      const socket = (gameConnection as any)._internalSocketRef?.current;
+
+      if (socket) {
+        const handleRematchStarted = () => {
+          console.log(
+            "CLIENT: MAIN PAGE - Rematch started, preventing mode changes"
+          );
+          setIsRematchInProgress(true);
+
+          setTimeout(() => {
+            setIsRematchInProgress(false);
+            console.log("CLIENT: MAIN PAGE - Rematch transition complete");
+          }, 2000);
+        };
+
+        const handleRematchRequested = () => {
+          console.log(
+            "CLIENT: MAIN PAGE - Rematch requested, preparing for transition"
+          );
+          setIsRematchInProgress(true);
+        };
+
+        const handleRematchDeclined = () => {
+          console.log(
+            "CLIENT: MAIN PAGE - Rematch declined, clearing transition state"
+          );
+          setIsRematchInProgress(false);
+        };
+
+        socket.on("rematch_started", handleRematchStarted);
+        socket.on("rematch_requested", handleRematchRequested);
+        socket.on("rematch_declined", handleRematchDeclined);
+
+        return () => {
+          socket.off("rematch_started", handleRematchStarted);
+          socket.off("rematch_requested", handleRematchRequested);
+          socket.off("rematch_declined", handleRematchDeclined);
+        };
+      }
+    }
+  }, [gameMode, gameConnection]);
+
+useEffect(() => {
+  if (typeof window !== "undefined") {
+    const storedGameId = sessionStorage.getItem("sharedGameId");
+    const fromSharedLink = sessionStorage.getItem("fromSharedLink");
+
+    if (storedGameId && fromSharedLink === "true" && !isProcessingSharedLink) {
+      console.log("SHARED LINK: Processing shared game link:", storedGameId);
+      
+      setIsProcessingSharedLink(true);
+      
+      // Clear browser autocomplete and force fresh state
+      setRemotePlayerNameInput("");
+      setRemoteGameIdInput(storedGameId);
+      
+      // Clear sessionStorage immediately to prevent re-processing
+      sessionStorage.removeItem("sharedGameId");
+      sessionStorage.removeItem("fromSharedLink");
+      
+      // IMPORTANT: Stay in select mode instead of switching to remote
+      // This will show the SelectScreen with the shared link banner
+      setGameMode("select");
+      
+      // Clear processing flag after UI is ready
+      setTimeout(() => {
+        setIsProcessingSharedLink(false);
+      }, 100);
+    }
+  }
+}, [isProcessingSharedLink, setRemotePlayerNameInput, setRemoteGameIdInput]);
 
 
   // Active game state selector
@@ -85,25 +209,23 @@ function CaroQuestPage() {
 
   // Display names
   const p1DisplayName = useMemo(() => {
-    if (gameMode === "remote") return gameConnection.players.find(p => p.playerId === 1)?.name || t("player", { id: 1 });
+    if (gameMode === "remote")
+      return (
+        gameConnection.players.find((p) => p.playerId === 1)?.name ||
+        t("player", { id: 1 })
+      );
     return player1NameLocal.trim() || t("player", { id: 1 });
   }, [gameMode, gameConnection.players, player1NameLocal, t]);
 
   const p2DisplayName = useMemo(() => {
-    if (gameMode === "remote") return gameConnection.players.find(p => p.playerId === 2)?.name || t("player", { id: 2 });
+    if (gameMode === "remote")
+      return (
+        gameConnection.players.find((p) => p.playerId === 2)?.name ||
+        t("player", { id: 2 })
+      );
     if (gameMode === "ai") return t("aiOpponent");
     return player2NameLocal.trim() || t("player", { id: 2 });
   }, [gameMode, gameConnection.players, player2NameLocal, t]);
-
-  // Winner toast effect
-  useEffect(() => {
-    if (activeGameState?.winner) {
-      const winnerName = activeGameState.winner === 1 ? p1DisplayName : p2DisplayName;
-      console.log(`CLIENT: Game Over. Winner: Player ${activeGameState.winner} (${winnerName})`);
-      toast({ title: t("playerDynamicWins", { playerName: winnerName }), description: t("congratulations"), duration: 8000 });
-    }
-  }, [activeGameState?.winner, p1DisplayName, p2DisplayName, toast, t]);
-
 
   const handleStartGameMode = useCallback(
     async (mode: GameMode) => {
@@ -111,215 +233,298 @@ function CaroQuestPage() {
       const currentOptions = activeGameState?.options || initialGameOptions;
 
       if (mode === "local" || mode === "ai") {
-         resetLocalGame(currentOptions); // Ensure local game is reset with current/default options
+        resetLocalGame(currentOptions);
       }
 
       if (mode === "remote") {
         if (!remotePlayerNameInput.trim()) {
-          toast({ title: t("errorTitle"), description: t("playerNameRequired"), variant: "destructive" });
+          console.error("CLIENT: Player name required for remote game");
           return;
         }
-        console.log(`CLIENT: Starting remote game. Player: ${remotePlayerNameInput}, Game ID: '${remoteGameIdInput.trim()}'`);
+        console.log(
+          `CLIENT: Starting remote game. Player: ${remotePlayerNameInput}, Game ID: '${remoteGameIdInput.trim()}'`
+        );
         try {
           await gameConnection.connectSocketIO();
           if (remoteGameIdInput.trim()) {
-            await gameConnection.joinGame(remoteGameIdInput.trim(), remotePlayerNameInput.trim(), currentOptions);
+            await gameConnection.joinGame(
+              remoteGameIdInput.trim(),
+              remotePlayerNameInput.trim(),
+              currentOptions
+            );
           } else {
-            await gameConnection.createGame(remotePlayerNameInput.trim(), currentOptions);
+            await gameConnection.createGame(
+              remotePlayerNameInput.trim(),
+              currentOptions
+            );
           }
-          // No explicit setGameMode("remote") here; rely on connection state changes
         } catch (err) {
           console.error("CLIENT: Remote game start/join failed:", err);
-          // Error is handled by gameConnection.error effect
         }
-      } else { // Local or AI
+      } else {
         if (mode === "local") {
-          setPlayer1NameLocal(prev => prev.trim() || t("player1Name")); // Use specific translation key
-          setPlayer2NameLocal(prev => prev.trim() || t("player2Name")); // Use specific translation key
+          setPlayer1NameLocal((prev) => prev.trim() || t("player1Name"));
+          setPlayer2NameLocal((prev) => prev.trim() || t("player2Name"));
         } else if (mode === "ai") {
-          setPlayer1NameLocal(prev => prev.trim() || t("player1Name")); // Use specific translation key
+          setPlayer1NameLocal((prev) => prev.trim() || t("player1Name"));
         }
-        setGameMode(mode); // Set mode for local/AI immediately
+        setGameMode(mode);
       }
     },
     [
-      gameConnection, remoteGameIdInput, remotePlayerNameInput,
-      toast, t, activeGameState?.options, initialGameOptions, resetLocalGame,
-      setPlayer1NameLocal, setPlayer2NameLocal
+      gameConnection,
+      remoteGameIdInput,
+      remotePlayerNameInput,
+      t,
+      activeGameState?.options,
+      initialGameOptions,
+      resetLocalGame,
+      setPlayer1NameLocal,
+      setPlayer2NameLocal,
     ]
   );
-  
-  // Effect to set gameMode to "remote" once connection is established and gameId is available
-  useEffect(() => {
-    if (gameConnection.gameId && gameConnection.isConnected && gameMode !== 'remote') {
-        console.log("CLIENT: Detected active remote game, setting gameMode to 'remote'.");
-        setGameMode('remote');
-    }
-  }, [gameConnection.gameId, gameConnection.isConnected, gameMode]);
-
 
   const goBackToMenu = useCallback(() => {
     console.log("CLIENT: Navigating back to menu. Current mode:", gameMode);
+    setIsRematchInProgress(false);
+    setIsProcessingSharedLink(false);
+
     if (gameMode === "remote" && gameConnection.isConnected) {
       console.log("CLIENT: Disconnecting from remote game.");
       gameConnection.disconnect();
     }
-    setGameMode("select"); // Go back to select screen
-    // resetLocalGame(initialGameOptions); // Reset local game state // This is handled by useLocalGame reset
+    setGameMode("select");
     gameConnection.clearError?.();
-    // setRemoteGameIdInput(""); // Cleared by useGameSetup or kept if from URL
-  }, [gameMode, gameConnection, initialGameOptions]);
+  }, [gameMode, gameConnection]);
 
   const resetGameHandler = useCallback(() => {
-    if (gameMode === "remote") {
-      toast({ title: t("gameReset"), description: t("featureNotAvailableRemote") });
-    } else {
-      console.log("CLIENT: Resetting local/AI game.");
-      resetLocalGame(activeGameState?.options || initialGameOptions); // Pass current options or defaults
-    }
-  }, [gameMode, toast, t, resetLocalGame, activeGameState?.options, initialGameOptions]);
+    console.log(`CLIENT: Resetting ${gameMode} game.`);
 
-  // Remote square click (optimistic updates for selection/highlight)
+    if (gameMode !== "remote") {
+      resetLocalGame(activeGameState?.options || initialGameOptions);
+    }
+  }, [gameMode, resetLocalGame, activeGameState?.options, initialGameOptions]);
+
+  // Remote game handlers
   const handleRemoteSquareClick = useCallback(
     (index: number) => {
       const remoteGS = gameConnection.gameState;
-      if (!remoteGS || !gameConnection.localPlayerId || remoteGS.winner || !gameConnection.gameId) return;
+      if (
+        !remoteGS ||
+        !gameConnection.localPlayerId ||
+        remoteGS.winner ||
+        !gameConnection.gameId
+      )
+        return;
+
       if (remoteGS.currentPlayerId !== gameConnection.localPlayerId) {
-        toast({ title: t("notYourTurnTitle"), description: t("notYourTurnDescription") });
+        console.log("CLIENT: Not player's turn, ignoring click");
         return;
       }
-      // Logic from original for remote click, using gameConnection.gameState and gameConnection.placePawnAction/movePawnAction
-      // ... (Full logic as in previous refactor step)
+
       const square = remoteGS.board[index];
       if (remoteGS.gamePhase === "placement") {
-        gameConnection.placePawnAction(index);
+        if (!square.pawn) {
+          gameConnection.placePawnAction(index);
+        }
       } else {
         if (remoteGS.selectedPawnIndex === null) {
-          if (square.pawn?.playerId === gameConnection.localPlayerId && !remoteGS.blockedPawnsInfo.has(index)) {
-            gameStore.getState().setGameState(highlightValidMoves(remoteGS, index));
-          } else if (square.pawn && remoteGS.blockedPawnsInfo.has(index)) { /* Toast */ }
-        } else { /* ... other conditions ... */ }
+          if (
+            square.pawn?.playerId === gameConnection.localPlayerId &&
+            !remoteGS.blockedPawnsInfo.has(index)
+          ) {
+            gameStore
+              .getState()
+              .setGameState(highlightValidMoves(remoteGS, index));
+          }
+        } else {
+          if (square.highlight === "validMove") {
+            gameConnection.movePawnAction(remoteGS.selectedPawnIndex, index);
+          } else {
+            gameStore.getState().setGameState(clearHighlights(remoteGS));
+          }
+        }
       }
     },
-  [gameConnection, toast, t]
+    [gameConnection]
   );
 
-  const handleSquareClick = useMemo(() =>
-    gameMode === "remote" ? handleRemoteSquareClick : handleLocalSquareClick,
-  [gameMode, handleRemoteSquareClick, handleLocalSquareClick]);
+  const handleSquareClick = useMemo(
+    () =>
+      gameMode === "remote" ? handleRemoteSquareClick : handleLocalSquareClick,
+    [gameMode, handleRemoteSquareClick, handleLocalSquareClick]
+  );
 
   const handleRemotePawnDragStart = useCallback(
     (pawnIndex: number) => {
-        const remoteGS = gameConnection.gameState;
-        if (!remoteGS || remoteGS.winner || remoteGS.gamePhase !== 'movement') return;
-        if (remoteGS.currentPlayerId !== gameConnection.localPlayerId) return;
-        if (remoteGS.blockedPawnsInfo.has(pawnIndex)) return;
+      const remoteGS = gameConnection.gameState;
+      if (!remoteGS || remoteGS.winner || remoteGS.gamePhase !== "movement")
+        return;
+      if (remoteGS.currentPlayerId !== gameConnection.localPlayerId) return;
+      if (remoteGS.blockedPawnsInfo.has(pawnIndex)) return;
 
-        const pawnOwnerId = remoteGS.board[pawnIndex]?.pawn?.playerId;
-        if (pawnOwnerId === gameConnection.localPlayerId) {
-            gameStore.getState().setGameState(highlightValidMoves(remoteGS, pawnIndex)); // Optimistic update
-        }
-    }, [gameConnection]);
+      const pawnOwnerId = remoteGS.board[pawnIndex]?.pawn?.playerId;
+      if (pawnOwnerId === gameConnection.localPlayerId) {
+        gameStore
+          .getState()
+          .setGameState(highlightValidMoves(remoteGS, pawnIndex));
+      }
+    },
+    [gameConnection]
+  );
 
   const handleRemotePawnDrop = useCallback(
-      (targetIndex: number) => {
-          const remoteGS = gameConnection.gameState;
-          if (!remoteGS || remoteGS.selectedPawnIndex === null) {
-              if(remoteGS) gameStore.getState().setGameState(clearHighlights(remoteGS));
-              return;
-          }
-          const targetSquare = remoteGS.board[targetIndex];
-          if (targetSquare.highlight === 'validMove') {
-              gameConnection.movePawnAction(remoteGS.selectedPawnIndex, targetIndex);
-          } else {
-              toast({ title: t("invalidDrop"), description: t("invalidDropDescription"), variant: "destructive" });
-              if(remoteGS) gameStore.getState().setGameState(clearHighlights(remoteGS)); // Clear optimistic highlights
-          }
-      }, [gameConnection, toast, t]);
+    (targetIndex: number) => {
+      const remoteGS = gameConnection.gameState;
+      if (!remoteGS || remoteGS.selectedPawnIndex === null) {
+        if (remoteGS)
+          gameStore.getState().setGameState(clearHighlights(remoteGS));
+        return;
+      }
+      const targetSquare = remoteGS.board[targetIndex];
+      if (targetSquare.highlight === "validMove") {
+        gameConnection.movePawnAction(remoteGS.selectedPawnIndex, targetIndex);
+      } else {
+        if (remoteGS)
+          gameStore.getState().setGameState(clearHighlights(remoteGS));
+      }
+    },
+    [gameConnection]
+  );
 
-  const handlePawnDragStart = useMemo(() =>
-    gameMode === "remote" ? handleRemotePawnDragStart : handleLocalPawnDragStart,
-  [gameMode, handleRemotePawnDragStart, handleLocalPawnDragStart]);
+  const handlePawnDragStart = useMemo(
+    () =>
+      gameMode === "remote"
+        ? handleRemotePawnDragStart
+        : handleLocalPawnDragStart,
+    [gameMode, handleRemotePawnDragStart, handleLocalPawnDragStart]
+  );
 
-  const handlePawnDrop = useMemo(() =>
-    gameMode === "remote" ? handleRemotePawnDrop : handleLocalPawnDrop,
-  [gameMode, handleRemotePawnDrop, handleLocalPawnDrop]);
+  const handlePawnDrop = useMemo(
+    () => (gameMode === "remote" ? handleRemotePawnDrop : handleLocalPawnDrop),
+    [gameMode, handleRemotePawnDrop, handleLocalPawnDrop]
+  );
 
-  const handleModalCreateNewGame = useCallback(() => { setShowGameExpiredModal(false); goBackToMenu(); setRemoteGameIdInput(""); }, [goBackToMenu, setRemoteGameIdInput]);
-  const handleModalGoHome = useCallback(() => { setShowGameExpiredModal(false); goBackToMenu(); setRemoteGameIdInput(""); }, [goBackToMenu, setRemoteGameIdInput]);
-  
+  const handleModalCreateNewGame = useCallback(() => {
+    setShowGameExpiredModal(false);
+    goBackToMenu();
+    setRemoteGameIdInput("");
+  }, [goBackToMenu, setRemoteGameIdInput]);
+
+  const handleModalGoHome = useCallback(() => {
+    setShowGameExpiredModal(false);
+    goBackToMenu();
+    setRemoteGameIdInput("");
+  }, [goBackToMenu, setRemoteGameIdInput]);
+
   const handleCopyGameLink = useCallback(() => {
     if (typeof window !== "undefined" && gameConnection.gameId) {
-      navigator.clipboard.writeText(`${window.location.origin}/game/${gameConnection.gameId}`)
-        .then(() => toast({ title: t("linkCopiedTitle"), description: t("linkCopiedDescription") }));
+      // FIXED: Use /{gameId} instead of /game/{gameId} to match your route structure
+      const shareableLink = `${window.location.origin}/${gameConnection.gameId}`;
+  
+      navigator.clipboard
+        .writeText(shareableLink)
+        .then(() => {
+          console.log("CLIENT: Game link copied to clipboard:", shareableLink);
+        })
+        .catch((err) => {
+          console.error("CLIENT: Failed to copy game link:", err);
+        });
     }
-  }, [gameConnection.gameId, toast, t]);
+  }, [gameConnection.gameId]);
 
   const selectScreenProps = {
     onStartGameMode: handleStartGameMode,
-    player1Name: player1NameLocal, setPlayer1Name: setPlayer1NameLocal,
-    player2Name: player2NameLocal, setPlayer2Name: setPlayer2NameLocal,
-    remotePlayerNameInput, setRemotePlayerNameInput,
-    remoteGameIdInput, setRemoteGameIdInput,
-    aiDifficulty: currentAiDifficulty, setAiDifficulty: setCurrentAiDifficulty,
-    isConnecting: gameConnection.isConnecting, // Pass current connecting state
-    gameConnectionError: gameConnection.error, // Pass connection error
+    player1Name: player1NameLocal,
+    setPlayer1Name: setPlayer1NameLocal,
+    player2Name: player2NameLocal,
+    setPlayer2Name: setPlayer2NameLocal,
+    remotePlayerNameInput,
+    setRemotePlayerNameInput,
+    remoteGameIdInput,
+    setRemoteGameIdInput,
+    aiDifficulty: currentAiDifficulty,
+    setAiDifficulty: setCurrentAiDifficulty,
+    isConnecting: gameConnection.isConnecting,
+    gameConnectionError: gameConnection.error,
+    isFromSharedLink: !!remoteGameIdInput && !gameConnection.isConnected,
+    isProcessingSharedLink,
   };
 
   const activeGameLayoutProps = {
-    gameMode, player1Name: p1DisplayName, player2Name: p2DisplayName,
-    localPlayerId: gameConnection.localPlayerId, connectedGameId: gameConnection.gameId,
-    isAILoading, currentLanguage,
-    onSquareClick: handleSquareClick, onPawnDragStart: handlePawnDragStart, onPawnDrop: handlePawnDrop,
-    onResetGame: resetGameHandler, onOpenRules: () => setIsRulesOpen(true),
-    onCopyGameLink: handleCopyGameLink, onGoBackToMenu: goBackToMenu,
+    gameMode,
+    player1Name: p1DisplayName,
+    player2Name: p2DisplayName,
+    localPlayerId: gameConnection.localPlayerId,
+    connectedGameId: gameConnection.gameId,
+    isAILoading,
+    currentLanguage,
+    onSquareClick: handleSquareClick,
+    onPawnDragStart: handlePawnDragStart,
+    onPawnDrop: handlePawnDrop,
+    onResetGame: resetGameHandler,
+    onOpenRules: () => setIsRulesOpen(true),
+    onCopyGameLink: handleCopyGameLink,
+    onGoBackToMenu: goBackToMenu,
     onSetLanguage: setLanguage,
-    // `gameState` will be passed by GameViewRouter from `activeGameState`
-    // `t` function will be passed by GameViewRouter
   };
-  
-  const clientPlayerNameForWaitingRoom = useMemo(() => {
-    const clientPlayer = gameConnection.players.find(p => p.playerId === gameConnection.localPlayerId);
-    return clientPlayer?.name || remotePlayerNameInput || t("yourName");
-  },[gameConnection.players, gameConnection.localPlayerId, remotePlayerNameInput, t]);
 
+  const clientPlayerNameForWaitingRoom = useMemo(() => {
+    const clientPlayer = gameConnection.players.find(
+      (p) => p.playerId === gameConnection.localPlayerId
+    );
+    return clientPlayer?.name || remotePlayerNameInput || t("yourName");
+  }, [
+    gameConnection.players,
+    gameConnection.localPlayerId,
+    remotePlayerNameInput,
+    t,
+  ]);
 
   return (
     <>
       <GameViewRouter
-        gameMode={gameMode}
-        isConnectingToRemote={gameConnection.isConnecting}
+        gameMode={isRematchInProgress ? "remote" : gameMode}
+        isConnectingToRemote={
+          gameConnection.isConnecting && !isRematchInProgress
+        }
         isRemoteConnected={gameConnection.isConnected}
-        remoteConnectionError={gameConnection.error}
-        isWaitingForOpponent={gameConnection.isWaitingForOpponent}
+        remoteConnectionError={
+          isRematchInProgress ? null : gameConnection.error
+        }
+        isWaitingForOpponent={
+          gameConnection.isWaitingForOpponent && !isRematchInProgress
+        }
         connectedGameId={gameConnection.gameId}
-        activeGameState={activeGameState} // Pass the memoized activeGameState
+        activeGameState={activeGameState}
         selectScreenProps={selectScreenProps}
         activeGameLayoutProps={activeGameLayoutProps}
         onGoBackToMenu={goBackToMenu}
         clientPlayerNameForWaitingRoom={clientPlayerNameForWaitingRoom}
       />
-      <Toaster />
+
       <Dialog open={isRulesOpen} onOpenChange={setIsRulesOpen}>
-        <RulesDialogContent pawnsPerPlayer={activeGameState?.options?.pawnsPerPlayer || PAWNS_PER_PLAYER} />
-      </Dialog>
-      {activeGameState?.winner && (
-        <WinnerDialog
-          winner={activeGameState.winner}
-          winnerName={activeGameState.winner === 1 ? p1DisplayName : p2DisplayName}
-          isOpen={!!activeGameState.winner}
-          onOpenChange={(open) => !open && resetGameHandler()} // Reset on close if desired
-          onPlayAgain={resetGameHandler}
+        <RulesDialogContent
+          pawnsPerPlayer={
+            activeGameState?.options?.pawnsPerPlayer || PAWNS_PER_PLAYER
+          }
         />
-      )}
+      </Dialog>
+
+      {/* Only keep this modal for critical errors that require page-level action */}
       <GameExpiredModal
-        isOpen={showGameExpiredModal}
+        isOpen={showGameExpiredModal && !isRematchInProgress}
         onCreateNew={handleModalCreateNewGame}
         onGoHome={handleModalGoHome}
-        errorType={(gameConnection.errorType === "INVALID_MOVE" ? "SERVER_ERROR" : gameConnection.errorType) || "GAME_NOT_FOUND"}
+        errorType={
+          gameConnection.errorType === "INVALID_MOVE"
+            ? "SERVER_ERROR"
+            : gameConnection.errorType || "GAME_NOT_FOUND"
+        }
         gameId={gameConnection.gameId || remoteGameIdInput}
       />
     </>
   );
 }
+
 export default CaroQuestPage;

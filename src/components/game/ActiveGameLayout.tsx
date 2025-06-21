@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import type { GameState, GameMode, PlayerId, Locale } from "@/lib/types";
 import { GameBoard } from "@/components/game/GameBoard";
 import { SidePanel } from "./SidePanel";
-import { IconToolbar } from "./IconToolbar";
+import { TopPanelMobile } from "./TopPanelMobile";
 import { Loader2, Smartphone, X } from "lucide-react";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
@@ -36,8 +36,18 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
   onPawnDrop,
   player1Name,
   player2Name,
-  ...rest
+  gameMode,
+  localPlayerId,
+  connectedGameId,
+  onCopyGameLink,
+  onResetGame,
+  onOpenRules,
+  onGoBackToMenu,
+  onSetLanguage,
+  currentLanguage,
 }) => {
+  const [showMobileAlert, setShowMobileAlert] = useState(true);
+
   if (!gameState) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -45,8 +55,6 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
       </div>
     );
   }
-
-  const [showMobileAlert, setShowMobileAlert] = useState(true);
 
   const MobileAlert = () => (
     <div className="lg:hidden p-4">
@@ -73,6 +81,17 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
   return (
     <div className="flex flex-col lg:flex-row items-stretch min-h-screen w-full bg-background text-foreground p-2 sm:p-4 gap-4">
       <MobileAlert />
+      
+      {/* Mobile Top Panel - All mobile UI logic */}
+      <TopPanelMobile 
+        gameState={gameState}
+        gameMode={gameMode}
+        player1Name={player1Name}
+        player2Name={player2Name}
+        localPlayerId={localPlayerId}
+        onResetGame={onResetGame}
+      />
+      
       {/* Main Game Board Area */}
       <main className="flex-grow flex flex-col items-center justify-center w-full lg:w-auto p-4 lg:p-8">
         {/* Scalable Game Board Wrapper */}
@@ -91,24 +110,22 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
         </div>
       </main>
 
-      {/* Side Panel: Desktop version OR Mobile alert */}
-      <div className="w-full lg:w-auto lg:flex-shrink-0">
+      {/* Side Panel: Desktop only */}
+      <div className="hidden lg:block w-full lg:w-auto lg:flex-shrink-0">
         <SidePanel
           gameState={gameState}
           player1Name={player1Name}
           player2Name={player2Name}
-          gameMode={rest.gameMode}
-          localPlayerId={rest.localPlayerId}
-          connectedGameId={rest.connectedGameId}
-          onCopyGameLink={rest.onCopyGameLink}
-          onResetGame={rest.onResetGame}
-          onOpenRules={rest.onOpenRules}
+          gameMode={gameMode}
+          localPlayerId={localPlayerId}
+          connectedGameId={connectedGameId}
+          onCopyGameLink={onCopyGameLink}
+          onResetGame={onResetGame}
+          onOpenRules={onOpenRules}
+          onGoBackToMenu={onGoBackToMenu}
+          onSetLanguage={onSetLanguage}
+          currentLanguage={currentLanguage}
         />
-      </div>
-
-      {/* Icon Toolbar for Mobile: at the bottom of the screen */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-sm border-t border-border p-1">
-        <IconToolbar {...rest} />
       </div>
     </div>
   );

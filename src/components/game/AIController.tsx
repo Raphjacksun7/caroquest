@@ -1,10 +1,9 @@
-
 "use client";
 
-import type { GameState, PlayerId } from '@/lib/gameLogic';
 import type { Action } from '@/lib/ai/mcts';
 import React, { useEffect, useCallback } from 'react';
-import { useAI } from '@/hooks/useAI'; // Assuming useAI is in hooks directory
+import { useAI } from '@/hooks/useAI'; 
+import { GameState, PlayerId } from '@/lib/types';
 
 interface AIControllerProps {
   gameState: GameState;

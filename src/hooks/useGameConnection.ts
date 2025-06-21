@@ -1,7 +1,5 @@
-// FILE: src/hooks/useGameConnection.ts
-
 "use client";
-import { useEffect, useCallback, useRef, useMemo } from "react";
+import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import type {
   GameState,
@@ -25,11 +23,11 @@ import { sessionManager } from "@/lib/sessionManager";
 
 export type { StoredPlayer };
 
-// Define event signatures for typed Socket.IO
 interface ServerToClientEvents {
   game_created: (data: {
     gameId: string;
     playerId: PlayerId;
+    sessionToken: string;
     gameState: ArrayBuffer;
     players: StoredPlayer[];
     options: GameOptions;
@@ -37,14 +35,21 @@ interface ServerToClientEvents {
   game_joined: (data: {
     gameId: string;
     playerId: PlayerId;
+    sessionToken: string;
     gameState: ArrayBuffer;
     players: StoredPlayer[];
     opponentName: string | null;
     waiting: boolean;
     options: GameOptions;
+    reconnection?: boolean;
   }) => void;
   opponent_joined: (data: {
     opponentName: string;
+    players: StoredPlayer[];
+  }) => void;
+  opponent_reconnected: (data: {
+    playerName: string;
+    playerId: PlayerId;
     players: StoredPlayer[];
   }) => void;
   game_start: (data: {
@@ -62,6 +67,7 @@ interface ServerToClientEvents {
     playerName: string;
     playerId: PlayerId;
     remainingPlayers: StoredPlayer[];
+    temporary?: boolean;
   }) => void;
   game_error: (data: {
     message: string;
@@ -77,7 +83,15 @@ interface ServerToClientEvents {
   pong_time: (serverTime: number) => void;
   matchmaking_joined: (data: { message: string }) => void;
   matchmaking_left: (data: { message: string }) => void;
-  // Standard socket.io events (optional to list, but good for clarity)
+  rematch_requested: (data: {
+    requestedBy: string;
+    playerName: string;
+  }) => void;
+  rematch_started: (data: {
+    gameState: ArrayBuffer;
+    options: GameOptions;
+  }) => void;
+  rematch_declined: (data: { declinedBy: string; playerName: string }) => void;
   connect: () => void;
   connect_error: (err: Error) => void;
   disconnect: (reason: Socket.DisconnectReason) => void;
@@ -115,6 +129,12 @@ interface ClientToServerEvents {
   }) => void;
   leave_matchmaking: (data: { clientTimestamp: number }) => void;
   reconnect_session: (data: { gameId: string; sessionToken: string }) => void;
+  request_rematch: (data: { gameId: string; clientTimestamp: number }) => void;
+  respond_rematch: (data: {
+    gameId: string;
+    accepted: boolean;
+    clientTimestamp: number;
+  }) => void;
 }
 
 export interface GameStoreState {
@@ -155,7 +175,7 @@ export interface GameStoreActions {
   clearStore: () => void;
   resetForNewGame: (options?: GameOptions) => void;
   requestFullState: () => void;
-  _internalSocketRef?: React.MutableRefObject<Socket | null>; // For internal use by actions
+  _internalSocketRef?: React.MutableRefObject<Socket | null>;
 }
 
 export type FullGameStore = GameStoreState & GameStoreActions;
@@ -339,12 +359,25 @@ export function useGameConnection() {
     }
   }, []);
 
+  const [persistedSocket, setPersistedSocket] = useState<Socket | null>(null);
+
   const setupEventHandlers = useCallback(
     (socket: Socket) => {
       console.log(
         "CLIENT: Setting up socket event handlers for socket ID:",
         socket.id
       );
+
+      // Store socket in multiple places immediately
+      socketRef.current = socket;
+      setPersistedSocket(socket);
+      (window as any).globalSocket = socket;
+      (window as any).persistedSocket = socket;
+
+      // Update store
+      gameStore.setState({
+        _internalSocketRef: socketRef,
+      } as Partial<FullGameStore>);
 
       const handlePongTime = (serverTime: number) => {
         if (lastPingSent.current) {
@@ -439,7 +472,7 @@ export function useGameConnection() {
             const self = players.find(
               (p: StoredPlayer) => p.playerId === playerId
             );
-            if (self) {
+            if (self && sessionToken) {
               sessionManager.saveSession(
                 gameId,
                 playerId,
@@ -531,6 +564,7 @@ export function useGameConnection() {
             console.log("CLIENT: Opponent joined. Both players ready.");
         }
       );
+
       socket.on(
         "game_start",
         ({
@@ -558,24 +592,56 @@ export function useGameConnection() {
           }
         }
       );
+
       socket.on(
         "game_updated",
         ({ gameState: compressedState, options, fullUpdate }) => {
+          console.log("CLIENT: Game updated event received");
+
+          // PRESERVE socket before any processing
+          const socketToPreserve = socket;
+
           const decodedState = handleAndDeserializeState(
             compressedState,
             "game_updated"
           );
           if (decodedState) {
+            console.log(
+              `CLIENT: Game updated. Winner: ${
+                decodedState.winner || "none"
+              }, Turn: P${decodedState.currentPlayerId}`
+            );
+
             setGameState({
               ...decodedState,
               options: options || gameStore.getState().gameState?.options,
             });
-            console.log(
-              `CLIENT: Game state fully updated. Current turn: P${decodedState.currentPlayerId}`
-            );
+
+            // CRITICAL: Always preserve socket after game updates
+            socketRef.current = socketToPreserve;
+            (window as any).globalSocket = socketToPreserve;
+            (window as any).persistedSocket = socketToPreserve;
+            (window as any).emergency_socket = socketToPreserve;
+
+            gameStore.setState({
+              _internalSocketRef: socketRef,
+              isConnected: socketToPreserve.connected,
+            } as Partial<FullGameStore>);
+
+            if (decodedState.winner) {
+              console.log("CLIENT: Game ended - CRITICAL socket preservation");
+              // Extra preservation when game ends
+              setTimeout(() => {
+                socketRef.current = socketToPreserve;
+                (window as any).globalSocket = socketToPreserve;
+                (window as any).persistedSocket = socketToPreserve;
+                console.log("CLIENT: Post-game socket preservation completed");
+              }, 50);
+            }
           }
         }
       );
+
       socket.on("game_delta", ({ updates, seqId }) => {
         try {
           storeApplyDeltaUpdates(updates, seqId);
@@ -583,17 +649,6 @@ export function useGameConnection() {
           setError(`Delta update error: ${err.message}`, "SERVER_ERROR");
         }
       });
-      socket.on(
-        "opponent_disconnected",
-        ({ playerName, playerId: disconnectedPlayerId, remainingPlayers }) => {
-          console.log("CLIENT: Event 'opponent_disconnected'", { playerName });
-          setError(`${playerName} disconnected. Waiting for rejoin.`, null);
-          setPlayers(remainingPlayers || []);
-          if (gameStore.getState().localPlayerId !== disconnectedPlayerId)
-            setOpponentName(null);
-          setIsWaitingForOpponent(true);
-        }
-      );
 
       socket.on("game_error", ({ message, errorType }) => {
         console.warn("CLIENT: Event 'game_error'", { message, errorType });
@@ -602,8 +657,10 @@ export function useGameConnection() {
         } else {
           // For critical errors, clear session and store
           setError(message, errorType || "SERVER_ERROR");
-          sessionManager.clearSession();
-          clearStore();
+          if (errorType === "GAME_NOT_FOUND") {
+            sessionManager.clearSession();
+            clearStore();
+          }
         }
       });
 
@@ -642,6 +699,7 @@ export function useGameConnection() {
           );
         }
       );
+
       socket.on("pong_time", handlePongTime);
       socket.on("matchmaking_joined", ({ message }) =>
         console.log("CLIENT: Matchmaking joined:", message)
@@ -650,12 +708,77 @@ export function useGameConnection() {
         console.log("CLIENT: Matchmaking left:", message)
       );
 
+      socket.on("rematch_requested", ({ requestedBy, playerName }) => {
+        // This is handled by SidePanel
+      });
+
+      socket.on(
+        "rematch_started",
+        ({ gameState: compressedState, options }) => {
+          console.log(
+            "CLIENT: CRITICAL - Rematch started, preserving socket during state update"
+          );
+
+          // PRESERVE socket BEFORE processing new state
+          const socketToPreserve = socket;
+          socketRef.current = socketToPreserve;
+          (window as any).globalSocket = socketToPreserve;
+          (window as any).persistedSocket = socketToPreserve;
+          (window as any).emergency_socket = socketToPreserve;
+
+          const decodedState = handleAndDeserializeState(
+            compressedState,
+            "rematch_started"
+          );
+          if (decodedState) {
+            console.log("CLIENT: Processing rematch state update...");
+
+            // Update game state
+            setGameState({ ...decodedState, options });
+            setIsWaitingForOpponent(false);
+
+            // CRITICAL: Immediately re-preserve socket after state update
+            setTimeout(() => {
+              console.log(
+                "CLIENT: Re-preserving socket after rematch state update"
+              );
+              socketRef.current = socketToPreserve;
+              (window as any).globalSocket = socketToPreserve;
+              (window as any).persistedSocket = socketToPreserve;
+              (window as any).emergency_socket = socketToPreserve;
+
+              // Force update store
+              gameStore.setState({
+                _internalSocketRef: socketRef,
+                isConnected: true,
+                isWaitingForOpponent: false,
+                error: null,
+                errorType: null,
+              } as Partial<FullGameStore>);
+
+              console.log(
+                `CLIENT: Rematch completed successfully. Socket preserved: ${socketToPreserve.id}`
+              );
+            }, 100);
+
+            console.log(
+              `CLIENT: Rematch started. Current turn: P${decodedState.currentPlayerId}`
+            );
+          }
+        }
+      );
+
+      socket.on("rematch_declined", ({ declinedBy, playerName }) => {
+        // This is handled by SidePanel
+      });
+
       console.log(
         "CLIENT: All socket event handlers registered for socket ID:",
         socket.id
       );
     },
     [
+      setPersistedSocket,
       setGameId,
       setGameState,
       setLocalPlayerId,
@@ -666,9 +789,11 @@ export function useGameConnection() {
       storeApplyDeltaUpdates,
       syncTime,
       setPingLatency,
+      clearStore,
     ]
   );
 
+  // FIXED: Enhanced connectSocketIO with immediate session check
   const connectSocketIO = useCallback((): Promise<Socket> => {
     if (connectionPromiseRef.current) return connectionPromiseRef.current;
     if (socketRef.current?.connected) return Promise.resolve(socketRef.current);
@@ -679,17 +804,6 @@ export function useGameConnection() {
         return;
       }
       console.log("CLIENT: Attempting socket connection to:", socketServerUrl);
-
-      // if (socketRef.current) {
-      //   socketRef.current.removeAllListeners();
-      //   socketRef.current.disconnect();
-      // }
-      // const newSocket = io(socketServerUrl, {
-      //   transports: ["websocket", "polling"], reconnectionAttempts: 3, reconnectionDelay: 1500,
-      //   timeout: 10000, path: "/api/socketio/", autoConnect: false, forceNew: true,
-      // });
-      // socketRef.current = newSocket;
-      // gameStore.setState({ _internalSocketRef: socketRef } as Partial<FullGameStore>);
 
       let newSocket: Socket<ServerToClientEvents, ClientToServerEvents>;
       if (socketRef.current && !socketRef.current.connected) {
@@ -703,10 +817,10 @@ export function useGameConnection() {
         newSocket = io(socketServerUrl, {
           path: "/api/socketio/",
           transports: ["websocket", "polling"],
-          reconnectionAttempts: 5, // Increased for potentially less stable mobile/prod networks
-          reconnectionDelay: 2000, // Start with 2s
-          reconnectionDelayMax: 10000, // Max delay 10s
-          timeout: 20000, // Connection timeout
+          reconnectionAttempts: 5,
+          reconnectionDelay: 2000,
+          reconnectionDelayMax: 10000,
+          timeout: 20000,
           autoConnect: false,
           forceNew: true,
         });
@@ -723,7 +837,7 @@ export function useGameConnection() {
       setupEventHandlers(newSocket);
 
       const connTimeout = setTimeout(() => {
-        console.error("CLIENT: Connection attempt timed out to Render server.");
+        console.error("CLIENT: Connection attempt timed out to server.");
         setError("Connection timeout.", "SERVER_ERROR");
         setIsConnecting(false);
         newSocket.disconnect();
@@ -734,19 +848,69 @@ export function useGameConnection() {
       newSocket.on("connect", () => {
         clearTimeout(connTimeout);
         console.log("CLIENT: Socket connected successfully. ID:", newSocket.id);
+
+        // Store socket references
+        socketRef.current = newSocket;
+        (window as any).globalSocket = newSocket;
+        (window as any).persistedSocket = newSocket;
+        (window as any).emergency_socket = newSocket;
+        (window as any).backup_socket = newSocket;
+
+        gameStore.setState({
+          _internalSocketRef: socketRef,
+          isConnected: true,
+          isConnecting: false,
+          error: null,
+          errorType: null,
+        } as Partial<FullGameStore>);
+
         setIsConnected(true);
         setIsConnecting(false);
         syncTime();
 
+        // CRITICAL FIX: Check for session and attempt reconnection IMMEDIATELY
         const session = sessionManager.getSession();
-        if (session) {
-          console.log(
-            `CLIENT: Found saved session for game ${session.gameId}. Attempting to reconnect...`
-          );
+        console.log("CLIENT: Checking for saved session after connect:", session);
+        
+        if (session && session.gameId && session.sessionToken) {
+          console.log(`CLIENT: Found saved session for game ${session.gameId}. Attempting to reconnect...`);
+          
+          // Set up temporary listeners for reconnection response
+          const reconnectionTimeout = setTimeout(() => {
+            console.warn("CLIENT: Reconnection attempt timed out");
+            // Don't clear session here - let user manually retry
+          }, 10000);
+
+          const handleReconnectionSuccess = (data: any) => {
+            clearTimeout(reconnectionTimeout);
+            console.log("CLIENT: Reconnection successful:", data);
+            newSocket.off("game_error", handleReconnectionError);
+          };
+
+          const handleReconnectionError = (error: any) => {
+            clearTimeout(reconnectionTimeout);
+            console.warn("CLIENT: Reconnection failed:", error);
+            
+            // Only clear session if it's truly invalid
+            if (error.errorType === "GAME_NOT_FOUND") {
+              console.log("CLIENT: Clearing invalid session");
+              sessionManager.clearSession();
+            }
+            
+            newSocket.off("game_joined", handleReconnectionSuccess);
+          };
+
+          // Set up one-time listeners
+          newSocket.once("game_joined", handleReconnectionSuccess);
+          newSocket.once("game_error", handleReconnectionError);
+
+          // Attempt reconnection
           newSocket.emit("reconnect_session", {
             gameId: session.gameId,
             sessionToken: session.sessionToken,
           });
+        } else {
+          console.log("CLIENT: No valid session found, ready for new connection");
         }
 
         connectionPromiseRef.current = null;
@@ -755,47 +919,44 @@ export function useGameConnection() {
 
       newSocket.on("connect_error", (err) => {
         clearTimeout(connTimeout);
-        console.error(
-          "CLIENT: Socket connection error to Render server:",
-          err.message,
-          err.name,
-          err.cause
-        );
+        console.error("CLIENT: Socket connection error:", err.message, err.name, err.cause);
         setError(`Connection failed: ${err.message}`, "SERVER_ERROR");
         setIsConnected(false);
         setIsConnecting(false);
         connectionPromiseRef.current = null;
         reject(err);
       });
+
       newSocket.on("disconnect", (reason) => {
         clearTimeout(connTimeout);
-        console.log(
-          "CLIENT: Socket disconnected from Render server. Reason:",
-          reason
-        );
+        console.log("CLIENT: Socket disconnected. Reason:", reason);
+
         setIsConnected(false);
         setIsConnecting(false);
-        if (
-          reason === "io server disconnect" ||
-          reason === "io client disconnect"
-        ) {
+
+        // Don't clear socket immediately for network disconnects
+        if (reason === "io server disconnect" || reason === "io client disconnect") {
+          console.log("CLIENT: Intentional disconnect - clearing socket references");
           connectionPromiseRef.current = null;
+          setTimeout(() => {
+            if (!socketRef.current?.connected) {
+              socketRef.current = null;
+              delete (window as any).globalSocket;
+              delete (window as any).persistedSocket;
+            }
+          }, 5000);
+        } else {
+          console.log("CLIENT: Network disconnect - preserving socket for reconnection");
         }
       });
 
-      console.log("CLIENT: Calling newSocket.connect() to Render server");
+      console.log("CLIENT: Calling newSocket.connect()");
       newSocket.connect();
     });
+    
     connectionPromiseRef.current = promise;
     return promise;
-  }, [
-    socketServerUrl,
-    setIsConnecting,
-    setError,
-    setIsConnected,
-    syncTime,
-    setupEventHandlers,
-  ]);
+  }, [socketServerUrl, setIsConnecting, setError, setIsConnected, syncTime, setupEventHandlers]);
 
   const getAdjustedTime = useCallback(
     () => Date.now() + serverTimeOffset.current,
@@ -821,6 +982,7 @@ export function useGameConnection() {
           clientTimestamp: getAdjustedTime(),
         });
       } catch (err: any) {
+        console.error("CLIENT: Create game failed:", err);
         setError(`Create game failed: ${err.message}`, "SERVER_ERROR");
         setIsWaitingForOpponent(false);
       }
@@ -828,14 +990,12 @@ export function useGameConnection() {
     [connectSocketIO, getAdjustedTime, setError, setIsWaitingForOpponent]
   );
 
+  // IMPROVED: joinGame method with better session handling
   const joinGame = useCallback(
     async (gameIdToJoin: string, playerName: string, options?: GameOptions) => {
-      console.log(
-        "CLIENT: joinGame action called by UI. Game:",
-        gameIdToJoin,
-        "Player:",
-        playerName
-      );
+      console.log("CLIENT: joinGame action called by UI. Game:", gameIdToJoin, "Player:", playerName);
+      
+      // Check if we're already in this game
       if (gameId === gameIdToJoin && isConnectedState) {
         console.log("CLIENT: Already in game", gameIdToJoin);
         const currentPlayers = gameStore.getState().players;
@@ -844,29 +1004,39 @@ export function useGameConnection() {
         }
         return;
       }
+
       try {
         const socket = await connectSocketIO();
         setError(null, null);
         setIsWaitingForOpponent(true);
-        socket.emit("join_game", {
-          gameId: gameIdToJoin,
-          playerName,
-          options,
-          clientTimestamp: getAdjustedTime(),
-        });
+        
+        // CRITICAL: Check if we have a session for this specific game
+        const savedSession = sessionManager.getSession();
+        if (savedSession && savedSession.gameId === gameIdToJoin && savedSession.playerName === playerName) {
+          console.log("CLIENT: Found matching session for this game, attempting reconnection first");
+          
+          socket.emit("reconnect_session", {
+            gameId: gameIdToJoin,
+            sessionToken: savedSession.sessionToken,
+          });
+        } else {
+          console.log("CLIENT: No matching session found, joining as new player");
+          
+          socket.emit("join_game", {
+            gameId: gameIdToJoin,
+            playerName,
+            options,
+            clientTimestamp: getAdjustedTime(),
+          });
+        }
+        
       } catch (err: any) {
+        console.error("CLIENT: Join game failed:", err);
         setError(`Join game failed: ${err.message}`, "SERVER_ERROR");
         setIsWaitingForOpponent(false);
       }
     },
-    [
-      connectSocketIO,
-      getAdjustedTime,
-      setError,
-      setIsWaitingForOpponent,
-      gameId,
-      isConnectedState,
-    ]
+    [connectSocketIO, getAdjustedTime, setError, setIsWaitingForOpponent, gameId, isConnectedState]
   );
 
   const placePawnAction = useCallback(
@@ -874,6 +1044,7 @@ export function useGameConnection() {
       const currentSocket = socketRef.current;
       const currentLobbyId = gameStore.getState().gameId;
       if (!currentSocket?.connected || !currentLobbyId) {
+        console.error("CLIENT: Not connected to game server for place pawn");
         setError("Not connected to game server.", "SERVER_ERROR");
         return;
       }
@@ -894,6 +1065,7 @@ export function useGameConnection() {
       const currentSocket = socketRef.current;
       const currentLobbyId = gameStore.getState().gameId;
       if (!currentSocket?.connected || !currentLobbyId) {
+        console.error("CLIENT: Not connected to game server for move pawn");
         setError("Not connected to game server.", "SERVER_ERROR");
         return;
       }
@@ -926,6 +1098,7 @@ export function useGameConnection() {
       console.log("CLIENT: joinMatchmakingQueue action. Player:", playerName);
       try {
         if (!playerName?.trim()) {
+          console.error("CLIENT: Player name is required for matchmaking");
           setError("Player name is required.", "JOIN_FAILED");
           return;
         }
@@ -936,6 +1109,7 @@ export function useGameConnection() {
           clientTimestamp: getAdjustedTime(),
         });
       } catch (err: any) {
+        console.error("CLIENT: Matchmaking join failed:", err);
         setError(`Matchmaking join failed: ${err.message}`, "SERVER_ERROR");
       }
     },
@@ -946,6 +1120,7 @@ export function useGameConnection() {
     console.log("CLIENT: leaveMatchmakingQueue action.");
     const currentSocket = socketRef.current;
     if (!currentSocket?.connected) {
+      console.error("CLIENT: Not connected for leave matchmaking");
       setError("Not connected.", "SERVER_ERROR");
       return;
     }
@@ -953,6 +1128,182 @@ export function useGameConnection() {
       clientTimestamp: getAdjustedTime(),
     });
   }, [getAdjustedTime, setError]);
+
+  const requestRematch = useCallback(() => {
+    console.log("CLIENT: requestRematch called");
+
+    // Try EVERY possible method to get the socket
+    let currentSocket = socketRef.current;
+
+    if (!currentSocket) {
+      currentSocket = persistedSocket;
+      console.log("CLIENT: Using persisted socket:", currentSocket?.id);
+    }
+
+    if (!currentSocket) {
+      currentSocket = (window as any).globalSocket;
+      console.log("CLIENT: Using global socket:", currentSocket?.id);
+    }
+
+    if (!currentSocket) {
+      currentSocket = (window as any).persistedSocket;
+      console.log(
+        "CLIENT: Using additional persisted socket:",
+        currentSocket?.id
+      );
+    }
+
+    if (!currentSocket) {
+      currentSocket = gameStore.getState()._internalSocketRef?.current || null;
+      console.log("CLIENT: Using store socket:", currentSocket?.id);
+    }
+
+    const currentLobbyId = gameStore.getState().gameId;
+
+    console.log("CLIENT: SUPER DETAILED rematch debug:", {
+      socketRef: !!socketRef.current,
+      persistedSocket: !!persistedSocket,
+      globalSocket: !!(window as any).globalSocket,
+      additionalPersisted: !!(window as any).persistedSocket,
+      storeSocket: !!gameStore.getState()._internalSocketRef?.current,
+      finalSocket: !!currentSocket,
+      socketConnected: currentSocket?.connected,
+      socketId: currentSocket?.id,
+      gameId: currentLobbyId,
+      isConnected: gameStore.getState().isConnected,
+      localPlayerId: gameStore.getState().localPlayerId,
+      players: gameStore.getState().players.length,
+    });
+
+    if (!currentSocket) {
+      console.error("CLIENT: CRITICAL - No socket found in ANY location");
+      setError(
+        "Socket connection completely lost. Please refresh the page.",
+        "SERVER_ERROR"
+      );
+      return;
+    }
+
+    if (!currentSocket.connected) {
+      console.error("CLIENT: Socket found but not connected");
+      setError("Connection lost. Please refresh the page.", "SERVER_ERROR");
+      return;
+    }
+
+    if (!currentLobbyId) {
+      console.error("CLIENT: No game ID found");
+      setError("Game session lost. Please start a new game.", "SERVER_ERROR");
+      return;
+    }
+
+    console.log(
+      `CLIENT: Requesting rematch for game ${currentLobbyId} via socket ${currentSocket.id}`
+    );
+
+    try {
+      currentSocket.emit("request_rematch", {
+        gameId: currentLobbyId,
+        clientTimestamp: getAdjustedTime(),
+      });
+      console.log("CLIENT: Rematch request sent successfully");
+    } catch (error: any) {
+      console.error("CLIENT: Error sending rematch request:", error);
+      setError(
+        `Failed to send rematch request: ${error.message}`,
+        "SERVER_ERROR"
+      );
+    }
+  }, [getAdjustedTime, setError, persistedSocket]);
+
+  const respondToRematch = useCallback(
+    (accepted: boolean) => {
+      console.log(`CLIENT: respondToRematch called with: ${accepted}`);
+
+      // Try EVERY possible method to get the socket
+      let currentSocket = socketRef.current;
+
+      if (!currentSocket) {
+        currentSocket = persistedSocket;
+        console.log(
+          "CLIENT: Using persisted socket for response:",
+          currentSocket?.id
+        );
+      }
+
+      if (!currentSocket) {
+        currentSocket = (window as any).globalSocket;
+        console.log(
+          "CLIENT: Using global socket for response:",
+          currentSocket?.id
+        );
+      }
+
+      if (!currentSocket) {
+        currentSocket = (window as any).persistedSocket;
+        console.log(
+          "CLIENT: Using additional persisted socket for response:",
+          currentSocket?.id
+        );
+      }
+
+      if (!currentSocket) {
+        currentSocket =
+          gameStore.getState()._internalSocketRef?.current || null;
+        console.log(
+          "CLIENT: Using store socket for response:",
+          currentSocket?.id
+        );
+      }
+
+      const currentLobbyId = gameStore.getState().gameId;
+
+      console.log("CLIENT: Respond rematch SUPER debug:", {
+        socketRef: !!socketRef.current,
+        persistedSocket: !!persistedSocket,
+        globalSocket: !!(window as any).globalSocket,
+        additionalPersisted: !!(window as any).persistedSocket,
+        storeSocket: !!gameStore.getState()._internalSocketRef?.current,
+        finalSocket: !!currentSocket,
+        socketConnected: currentSocket?.connected,
+        socketId: currentSocket?.id,
+        gameId: currentLobbyId,
+        accepted,
+      });
+
+      if (!currentSocket?.connected || !currentLobbyId) {
+        console.error(
+          "CLIENT: Cannot respond to rematch - connection/game issue"
+        );
+        setError(
+          "Connection issue. Cannot respond to rematch.",
+          "SERVER_ERROR"
+        );
+        return;
+      }
+
+      console.log(
+        `CLIENT: Responding to rematch request: ${
+          accepted ? "accepted" : "declined"
+        }`
+      );
+
+      try {
+        currentSocket.emit("respond_rematch", {
+          gameId: currentLobbyId,
+          accepted,
+          clientTimestamp: getAdjustedTime(),
+        });
+        console.log("CLIENT: Rematch response sent successfully");
+      } catch (error: any) {
+        console.error("CLIENT: Error sending rematch response:", error);
+        setError(
+          `Failed to respond to rematch: ${error.message}`,
+          "SERVER_ERROR"
+        );
+      }
+    },
+    [getAdjustedTime, setError, persistedSocket]
+  );
 
   useEffect(() => {
     return () => {
@@ -964,6 +1315,19 @@ export function useGameConnection() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    // Make sure the socket reference is always available to the store
+    if (socketRef.current) {
+      gameStore.setState({
+        _internalSocketRef: socketRef,
+      } as Partial<FullGameStore>);
+      console.log(
+        "CLIENT: Socket reference updated in store:",
+        socketRef.current.id
+      );
+    }
+  }, [socketRef.current?.id]);
 
   return {
     gameState: useGameStore((state) => state.gameState),
@@ -986,5 +1350,8 @@ export function useGameConnection() {
     connectSocketIO,
     joinMatchmakingQueue,
     leaveMatchmakingQueue,
+    respondToRematch,
+    requestRematch,
+    _internalSocketRef: socketRef,
   };
 }

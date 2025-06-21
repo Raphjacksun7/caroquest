@@ -127,3 +127,40 @@ body.dragging-pawn, body.dragging-pawn * {
     @apply bg-background text-foreground;
   }
 }
+
+
+
+/* Add this to your global CSS file or component styles */
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
+}
+
+/* Prevent browser autocomplete styling */
+input[data-lpignore="true"] {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+input[data-lpignore="true"]:focus {
+  background-color: white !important;
+}
+
+/* Hide password manager icons */
+input[data-form-type="other"]::-webkit-contacts-auto-fill-button,
+input[data-form-type="other"]::-webkit-credentials-auto-fill-button {
+  display: none !important;
+}
+
+/* Additional autocomplete prevention */
+input[autocomplete="off"] {
+  background-color: transparent;
+}
+
+input[autocomplete="off"]:focus {
+  background-color: white;
+}
