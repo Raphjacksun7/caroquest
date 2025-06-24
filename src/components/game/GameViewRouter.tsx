@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { GameState, GameMode } from "@/lib/types";
-import { SelectScreen } from "./SelectScreen"; // NEW: Import SelectScreen instead of SelectGameModeScreen
+import { SelectScreen } from "./SelectScreen"; 
 import { ActiveGameLayout } from "./ActiveGameLayout";
 import { WaitingRoom } from "./WaitingRoom";
 import { Loader2, Home } from "lucide-react";

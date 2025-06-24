@@ -1,3 +1,4 @@
+// app/page.tsx - Clean main page without prop dependencies
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
@@ -13,27 +14,42 @@ import { GameViewRouter } from "@/components/game/GameViewRouter";
 import { RulesDialogContent } from "@/components/game/RulesDialog";
 import { GameExpiredModal } from "@/components/game/GameExpiredModal";
 import { Dialog } from "@/components/ui/dialog";
-import { useParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 // Hooks
 import { useTranslation } from "@/hooks/useTranslation";
 import { useGameConnection, gameStore } from "@/hooks/useGameConnection";
 import { useLocalGame } from "@/hooks/useLocalGame";
-import { useGameUrlManager } from "@/hooks/useGameUrlManager";
 import { useGameSetup } from "@/hooks/useGameSetup";
+import { usePersistence } from "@/hooks/usePersistence";
 
 function CaroQuestPage() {
-  const pathParams = useParams();
+  const router = useRouter();
   const [gameMode, setGameMode] = useState<GameMode>("select");
   const [isRematchInProgress, setIsRematchInProgress] = useState(false);
   const [isProcessingSharedLink, setIsProcessingSharedLink] = useState(false);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const { save, loadSafe, remove, isHydrated } = usePersistence();
 
-  const gameIdFromUrl = useMemo(() => {
-    const id = Array.isArray(pathParams?.gameId)
-      ? pathParams.gameId[0]
-      : pathParams?.gameId;
-    return id && id !== "local" && id !== "ai" ? id : "";
-  }, [pathParams]);
+  // Handle game mode restoration from sessionStorage
+  useEffect(() => {
+    if (hasInitialized) return;
+
+    if (typeof window !== "undefined") {
+      const storedMode = sessionStorage.getItem("gameMode");
+      const fromDirectURL = sessionStorage.getItem("fromDirectURL");
+      
+      if (storedMode && fromDirectURL === "true") {
+        console.log("MAIN: Restoring game mode from direct URL:", storedMode);
+        setGameMode(storedMode as GameMode);
+        
+        // Clear the direct URL flag after restoration
+        sessionStorage.removeItem("fromDirectURL");
+      }
+    }
+
+    setHasInitialized(true);
+  }, [hasInitialized]);
 
   const {
     player1NameLocal,
@@ -46,7 +62,7 @@ function CaroQuestPage() {
     setRemoteGameIdInput,
     currentAiDifficulty,
     setCurrentAiDifficulty,
-  } = useGameSetup({ gameIdFromUrl });
+  } = useGameSetup({ gameIdFromUrl: "" });
 
   const { t, currentLanguage, setLanguage } = useTranslation();
   const [showGameExpiredModal, setShowGameExpiredModal] = useState(false);
@@ -73,22 +89,103 @@ function CaroQuestPage() {
   const gameConnection = useGameConnection();
   const [isRulesOpen, setIsRulesOpen] = useState(false);
 
-  useGameUrlManager(gameMode, gameConnection.gameId);
+  // Update URL based on game mode
+  useEffect(() => {
+    if (!hasInitialized) return;
 
-  // Handle errors
+    if (typeof window !== "undefined") {
+      const currentPath = window.location.pathname;
+      
+      // Update URL to match game mode
+      if (gameMode === "ai" && currentPath !== "/game/wizard") {
+        console.log("MAIN: Updating URL for AI game");
+        window.history.replaceState(null, "", "/game/wizard");
+      } else if (gameMode === "local" && currentPath !== "/game/local") {
+        console.log("MAIN: Updating URL for local game");
+        window.history.replaceState(null, "", "/game/local");
+      } else if (gameMode === "remote" && gameConnection.gameId) {
+        const expectedPath = `/game/${gameConnection.gameId}`;
+        if (currentPath !== expectedPath) {
+          console.log("MAIN: Updating URL for remote game:", expectedPath);
+          window.history.replaceState(null, "", expectedPath);
+        }
+      } else if (gameMode === "select" && currentPath !== "/") {
+        console.log("MAIN: Updating URL for select screen");
+        window.history.replaceState(null, "", "/");
+      }
+
+      // Persist game mode
+      if (gameMode !== "select") {
+        sessionStorage.setItem("gameMode", gameMode);
+      } else {
+        sessionStorage.removeItem("gameMode");
+      }
+    }
+  }, [gameMode, gameConnection.gameId, hasInitialized]);
+
+  // Handle shared link processing
+  useEffect(() => {
+    if (!hasInitialized || !isHydrated) return;
+
+    if (typeof window !== "undefined") {
+      const storedGameId = sessionStorage.getItem("sharedGameId");
+      const fromSharedLink = sessionStorage.getItem("fromSharedLink");
+
+      if (storedGameId && fromSharedLink === "true" && !isProcessingSharedLink) {
+        console.log("MAIN: Processing shared game link:", storedGameId);
+        
+        // Check if this is the creator or a new joiner
+        const isGameCreator = loadSafe(`creator_${storedGameId}`, false);
+        console.log("MAIN: Is game creator:", isGameCreator);
+        
+        setIsProcessingSharedLink(true);
+        
+        // Clear browser autocomplete and set up for joining
+        setRemotePlayerNameInput("");
+        setRemoteGameIdInput(storedGameId);
+        
+        // Clear the shared link flag
+        sessionStorage.removeItem("fromSharedLink");
+        
+        if (isGameCreator) {
+          // Creator is returning, don't show select screen
+          console.log("MAIN: Creator returning via shared link, redirecting to game page");
+          router.push(`/game/${storedGameId}`);
+        } else {
+          // Show select screen with shared link banner for new joiners
+          console.log("MAIN: New joiner via shared link, showing select screen");
+          setGameMode("select");
+        }
+        
+        setTimeout(() => {
+          setIsProcessingSharedLink(false);
+        }, 100);
+      }
+    }
+  }, [hasInitialized, isHydrated, isProcessingSharedLink, setRemotePlayerNameInput, setRemoteGameIdInput, router, loadSafe]);
+
+  // Handle game creation success to mark creator status
+  useEffect(() => {
+    if (gameConnection.gameId && gameMode === "remote" && !remoteGameIdInput.trim()) {
+      // This means we just created a new game (no existing gameId was provided)
+      console.log("MAIN: Marking as game creator for gameId:", gameConnection.gameId);
+      save(`creator_${gameConnection.gameId}`, true);
+      save(`player_${gameConnection.gameId}`, remotePlayerNameInput.trim());
+    }
+  }, [gameConnection.gameId, gameMode, remoteGameIdInput, remotePlayerNameInput, save]);
+
+  // Handle connection errors
   useEffect(() => {
     if (
       gameConnection.error &&
       gameConnection.errorType &&
       !isRematchInProgress
     ) {
-      console.log("CLIENT: Game Connection Error received:", {
+      console.log("MAIN: Game Connection Error received:", {
         error: gameConnection.error,
         type: gameConnection.errorType,
-        isRematchInProgress,
       });
 
-      // Only show modals for critical errors when not in rematch
       if (
         ["GAME_NOT_FOUND", "GAME_FULL", "JOIN_FAILED"].includes(
           gameConnection.errorType
@@ -100,23 +197,16 @@ function CaroQuestPage() {
     }
   }, [gameConnection.error, gameConnection.errorType, isRematchInProgress]);
 
-  // Handle game mode changes
+  // Handle game mode changes from connection
   useEffect(() => {
-    if (isRematchInProgress) {
-      console.log(
-        "CLIENT: Rematch in progress - maintaining current game mode"
-      );
-      return;
-    }
+    if (isRematchInProgress) return;
 
     if (
       gameConnection.gameId &&
       gameConnection.isConnected &&
       gameMode !== "remote"
     ) {
-      console.log(
-        "CLIENT: Detected active remote game, setting gameMode to 'remote'."
-      );
+      console.log("MAIN: Active remote connection detected, switching to remote mode");
       setGameMode("remote");
     }
   }, [
@@ -133,28 +223,16 @@ function CaroQuestPage() {
 
       if (socket) {
         const handleRematchStarted = () => {
-          console.log(
-            "CLIENT: MAIN PAGE - Rematch started, preventing mode changes"
-          );
+          console.log("MAIN: Rematch started");
           setIsRematchInProgress(true);
-
-          setTimeout(() => {
-            setIsRematchInProgress(false);
-            console.log("CLIENT: MAIN PAGE - Rematch transition complete");
-          }, 2000);
+          setTimeout(() => setIsRematchInProgress(false), 2000);
         };
 
         const handleRematchRequested = () => {
-          console.log(
-            "CLIENT: MAIN PAGE - Rematch requested, preparing for transition"
-          );
           setIsRematchInProgress(true);
         };
 
         const handleRematchDeclined = () => {
-          console.log(
-            "CLIENT: MAIN PAGE - Rematch declined, clearing transition state"
-          );
           setIsRematchInProgress(false);
         };
 
@@ -170,37 +248,6 @@ function CaroQuestPage() {
       }
     }
   }, [gameMode, gameConnection]);
-
-useEffect(() => {
-  if (typeof window !== "undefined") {
-    const storedGameId = sessionStorage.getItem("sharedGameId");
-    const fromSharedLink = sessionStorage.getItem("fromSharedLink");
-
-    if (storedGameId && fromSharedLink === "true" && !isProcessingSharedLink) {
-      console.log("SHARED LINK: Processing shared game link:", storedGameId);
-      
-      setIsProcessingSharedLink(true);
-      
-      // Clear browser autocomplete and force fresh state
-      setRemotePlayerNameInput("");
-      setRemoteGameIdInput(storedGameId);
-      
-      // Clear sessionStorage immediately to prevent re-processing
-      sessionStorage.removeItem("sharedGameId");
-      sessionStorage.removeItem("fromSharedLink");
-      
-      // IMPORTANT: Stay in select mode instead of switching to remote
-      // This will show the SelectScreen with the shared link banner
-      setGameMode("select");
-      
-      // Clear processing flag after UI is ready
-      setTimeout(() => {
-        setIsProcessingSharedLink(false);
-      }, 100);
-    }
-  }
-}, [isProcessingSharedLink, setRemotePlayerNameInput, setRemoteGameIdInput]);
-
 
   // Active game state selector
   const activeGameState = useMemo(() => {
@@ -229,7 +276,7 @@ useEffect(() => {
 
   const handleStartGameMode = useCallback(
     async (mode: GameMode) => {
-      console.log(`CLIENT: Attempting to start game in mode: ${mode}`);
+      console.log(`MAIN: Starting game mode: ${mode}`);
       const currentOptions = activeGameState?.options || initialGameOptions;
 
       if (mode === "local" || mode === "ai") {
@@ -238,28 +285,31 @@ useEffect(() => {
 
       if (mode === "remote") {
         if (!remotePlayerNameInput.trim()) {
-          console.error("CLIENT: Player name required for remote game");
+          console.error("MAIN: Player name required for remote game");
           return;
         }
-        console.log(
-          `CLIENT: Starting remote game. Player: ${remotePlayerNameInput}, Game ID: '${remoteGameIdInput.trim()}'`
-        );
+        
         try {
           await gameConnection.connectSocketIO();
           if (remoteGameIdInput.trim()) {
+            // Joining an existing game
+            console.log("MAIN: Joining existing game:", remoteGameIdInput);
             await gameConnection.joinGame(
               remoteGameIdInput.trim(),
               remotePlayerNameInput.trim(),
               currentOptions
             );
           } else {
+            // Creating a new game
+            console.log("MAIN: Creating new game");
             await gameConnection.createGame(
               remotePlayerNameInput.trim(),
               currentOptions
             );
+            // Creator status will be set in the useEffect above
           }
         } catch (err) {
-          console.error("CLIENT: Remote game start/join failed:", err);
+          console.error("MAIN: Remote game failed:", err);
         }
       } else {
         if (mode === "local") {
@@ -285,27 +335,34 @@ useEffect(() => {
   );
 
   const goBackToMenu = useCallback(() => {
-    console.log("CLIENT: Navigating back to menu. Current mode:", gameMode);
+    console.log("MAIN: Going back to menu from:", gameMode);
+    
     setIsRematchInProgress(false);
     setIsProcessingSharedLink(false);
 
     if (gameMode === "remote" && gameConnection.isConnected) {
-      console.log("CLIENT: Disconnecting from remote game.");
       gameConnection.disconnect();
     }
+    
+    // Clear remote game data if going back from remote mode
+    if (gameMode === "remote" && gameConnection.gameId) {
+      remove(`creator_${gameConnection.gameId}`);
+      remove(`player_${gameConnection.gameId}`);
+    }
+    
     setGameMode("select");
     gameConnection.clearError?.();
-  }, [gameMode, gameConnection]);
+    router.push("/");
+  }, [gameMode, gameConnection, router, remove]);
 
   const resetGameHandler = useCallback(() => {
-    console.log(`CLIENT: Resetting ${gameMode} game.`);
-
+    console.log(`MAIN: Resetting ${gameMode} game`);
     if (gameMode !== "remote") {
       resetLocalGame(activeGameState?.options || initialGameOptions);
     }
   }, [gameMode, resetLocalGame, activeGameState?.options, initialGameOptions]);
 
-  // Remote game handlers
+  // Remote game interaction handlers
   const handleRemoteSquareClick = useCallback(
     (index: number) => {
       const remoteGS = gameConnection.gameState;
@@ -317,10 +374,7 @@ useEffect(() => {
       )
         return;
 
-      if (remoteGS.currentPlayerId !== gameConnection.localPlayerId) {
-        console.log("CLIENT: Not player's turn, ignoring click");
-        return;
-      }
+      if (remoteGS.currentPlayerId !== gameConnection.localPlayerId) return;
 
       const square = remoteGS.board[index];
       if (remoteGS.gamePhase === "placement") {
@@ -405,6 +459,22 @@ useEffect(() => {
     [gameMode, handleRemotePawnDrop, handleLocalPawnDrop]
   );
 
+  const handleCopyGameLink = useCallback(() => {
+    if (typeof window !== "undefined" && gameConnection.gameId) {
+      const shareableLink = `${window.location.origin}/game/${gameConnection.gameId}`;
+  
+      navigator.clipboard
+        .writeText(shareableLink)
+        .then(() => {
+          console.log("MAIN: Game link copied:", shareableLink);
+        })
+        .catch((err) => {
+          console.error("MAIN: Failed to copy game link:", err);
+        });
+    }
+  }, [gameConnection.gameId]);
+
+  // Modal handlers
   const handleModalCreateNewGame = useCallback(() => {
     setShowGameExpiredModal(false);
     goBackToMenu();
@@ -417,22 +487,7 @@ useEffect(() => {
     setRemoteGameIdInput("");
   }, [goBackToMenu, setRemoteGameIdInput]);
 
-  const handleCopyGameLink = useCallback(() => {
-    if (typeof window !== "undefined" && gameConnection.gameId) {
-      // FIXED: Use /{gameId} instead of /game/{gameId} to match your route structure
-      const shareableLink = `${window.location.origin}/${gameConnection.gameId}`;
-  
-      navigator.clipboard
-        .writeText(shareableLink)
-        .then(() => {
-          console.log("CLIENT: Game link copied to clipboard:", shareableLink);
-        })
-        .catch((err) => {
-          console.error("CLIENT: Failed to copy game link:", err);
-        });
-    }
-  }, [gameConnection.gameId]);
-
+  // Component props
   const selectScreenProps = {
     onStartGameMode: handleStartGameMode,
     player1Name: player1NameLocal,
@@ -511,7 +566,6 @@ useEffect(() => {
         />
       </Dialog>
 
-      {/* Only keep this modal for critical errors that require page-level action */}
       <GameExpiredModal
         isOpen={showGameExpiredModal && !isRematchInProgress}
         onCreateNew={handleModalCreateNewGame}
