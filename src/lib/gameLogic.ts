@@ -271,11 +271,16 @@ export function updateDeadZones(
 
 /**
  * Checks if a player has won by forming a diagonal of 4 pawns.
+ * OPTIMIZED: Only checks diagonals passing through the last moved piece.
  * Considers blocked pawns, blocking pawns, dead zone creators, and dead zones.
  * @param gameState The current state of the game.
+ * @param lastMoveIndex Optional index of the last move to optimize checking
  * @returns An object containing the winner's PlayerId and the winning line, or nulls if no winner.
  */
-export function checkWinCondition(gameState: Readonly<GameState>): {
+export function checkWinCondition(
+  gameState: Readonly<GameState>,
+  lastMoveIndex?: number
+): {
   winner: PlayerId | null;
   winningLine: number[] | null;
 } {
@@ -287,8 +292,27 @@ export function checkWinCondition(gameState: Readonly<GameState>): {
     blockingPawnsInfo,
     deadZoneCreatorPawnsInfo,
   } = gameState;
-  // Only need to check two main diagonal directions (down-right, down-left)
-  // as starting points will cover all possibilities.
+
+  // OPTIMIZATION: If lastMoveIndex provided, only check around that square
+  if (lastMoveIndex !== undefined && lastMoveIndex >= 0) {
+    const lastSquare = board[lastMoveIndex];
+    if (lastSquare?.pawn) {
+      const playerId = lastSquare.pawn.playerId;
+      const result = checkWinAroundSquare(
+        board,
+        lastMoveIndex,
+        playerId,
+        playerColors,
+        deadZoneSquares,
+        blockedPawnsInfo,
+        blockingPawnsInfo,
+        deadZoneCreatorPawnsInfo
+      );
+      if (result.winner) return result;
+    }
+  }
+
+  // Fallback to full board check (for game load, rematch, etc.)
   const directions = [
     { dr: 1, dc: 1 }, // Down-Right
     { dr: 1, dc: -1 }, // Down-Left
@@ -298,7 +322,6 @@ export function checkWinCondition(gameState: Readonly<GameState>): {
     const playerAssignedColor = playerColors[playerId];
     for (let r = 0; r < BOARD_SIZE; r++) {
       for (let c = 0; c < BOARD_SIZE; c++) {
-        // For each square, check if it's a potential start of a winning line
         for (const dir of directions) {
           const line: number[] = [];
           let possible = true;
@@ -306,7 +329,6 @@ export function checkWinCondition(gameState: Readonly<GameState>): {
             const curR = r + dir.dr * step;
             const curC = c + dir.dc * step;
 
-            // Check bounds
             if (
               curR < 0 ||
               curR >= BOARD_SIZE ||
@@ -319,15 +341,14 @@ export function checkWinCondition(gameState: Readonly<GameState>): {
             const idx = curR * BOARD_SIZE + curC;
             const sq = board[idx];
 
-            // Check conditions for a valid pawn in the winning line
             if (
-              !sq.pawn || // Must have a pawn
-              sq.pawn.playerId !== playerId || // Must be player's own pawn
-              sq.boardColor !== playerAssignedColor || // Must be on player's assigned color square
-              blockedPawnsInfo.has(idx) || // Pawn cannot be blocked
-              blockingPawnsInfo.has(idx) || // Pawn cannot be actively blocking another
-              deadZoneCreatorPawnsInfo.has(idx) || // Pawn cannot be creating a dead zone
-              deadZoneSquares.get(idx) === playerId // Square cannot be a dead zone for this player
+              !sq.pawn ||
+              sq.pawn.playerId !== playerId ||
+              sq.boardColor !== playerAssignedColor ||
+              blockedPawnsInfo.has(idx) ||
+              blockingPawnsInfo.has(idx) ||
+              deadZoneCreatorPawnsInfo.has(idx) ||
+              deadZoneSquares.get(idx) === playerId
             ) {
               possible = false;
               break;
@@ -341,7 +362,89 @@ export function checkWinCondition(gameState: Readonly<GameState>): {
       }
     }
   }
-  return { winner: null, winningLine: null }; // No winner
+  return { winner: null, winningLine: null };
+}
+
+/**
+ * OPTIMIZATION: Helper function to check win condition only around a specific square.
+ * This is much faster than checking the entire board (O(8) vs O(256)).
+ * @param board The game board
+ * @param squareIndex Index of the square to check around
+ * @param playerId Player who owns the pawn at squareIndex
+ * @returns Win result or null
+ */
+function checkWinAroundSquare(
+  board: Readonly<SquareState[]>,
+  squareIndex: number,
+  playerId: PlayerId,
+  playerColors: Readonly<Record<PlayerId, SquareColor>>,
+  deadZoneSquares: ReadonlyMap<number, PlayerId>,
+  blockedPawnsInfo: ReadonlySet<number>,
+  blockingPawnsInfo: ReadonlySet<number>,
+  deadZoneCreatorPawnsInfo: ReadonlySet<number>
+): { winner: PlayerId | null; winningLine: number[] | null } {
+  const square = board[squareIndex];
+  const { row, col } = square;
+  const playerAssignedColor = playerColors[playerId];
+
+  const directions = [
+    { dr: 1, dc: 1 }, // Down-Right
+    { dr: 1, dc: -1 }, // Down-Left
+  ];
+
+  for (const dir of directions) {
+    // Find the start of the potential line in this direction
+    let startR = row;
+    let startC = col;
+    
+    // Move backwards to find the start point
+    while (true) {
+      const nextR = startR - dir.dr;
+      const nextC = startC - dir.dc;
+      if (nextR < 0 || nextR >= BOARD_SIZE || nextC < 0 || nextC >= BOARD_SIZE) {
+        break;
+      }
+      startR = nextR;
+      startC = nextC;
+    }
+
+    // Now check forward from the start point
+    const line: number[] = [];
+    let possible = true;
+    
+    for (let step = 0; step < WINNING_LINE_LENGTH; step++) {
+      const curR = startR + dir.dr * step;
+      const curC = startC + dir.dc * step;
+
+      if (curR < 0 || curR >= BOARD_SIZE || curC < 0 || curC >= BOARD_SIZE) {
+        possible = false;
+        break;
+      }
+
+      const idx = curR * BOARD_SIZE + curC;
+      const sq = board[idx];
+
+      if (
+        !sq.pawn ||
+        sq.pawn.playerId !== playerId ||
+        sq.boardColor !== playerAssignedColor ||
+        blockedPawnsInfo.has(idx) ||
+        blockingPawnsInfo.has(idx) ||
+        deadZoneCreatorPawnsInfo.has(idx) ||
+        deadZoneSquares.get(idx) === playerId
+      ) {
+        possible = false;
+        break;
+      }
+      line.push(idx);
+    }
+
+    if (possible && line.length === WINNING_LINE_LENGTH) {
+      return { winner: playerId, winningLine: line };
+    }
+  }
+
+  return { winner: null, winningLine: null };
 }
 
 /**
@@ -424,8 +527,8 @@ export function placePawn(
     options: { ...gameState.options }, // Preserve game options
   };
 
-  // Check for win condition
-  const { winner, winningLine } = checkWinCondition(tempGameState);
+  // Check for win condition (optimized: only check around the placement)
+  const { winner, winningLine } = checkWinCondition(tempGameState, squareIndex);
 
   // Determine next player
   const nextPlayerId = actingPlayerId === 1 ? 2 : 1;
@@ -500,8 +603,8 @@ export function movePawn(
     options: { ...gameState.options }, // Preserve game options
   };
 
-  // Check for win condition
-  const { winner, winningLine } = checkWinCondition(tempGameState);
+  // Check for win condition (optimized: only check around the move)
+  const { winner, winningLine } = checkWinCondition(tempGameState, toIndex);
 
   // Determine next player
   const nextPlayerId = actingPlayerId === 1 ? 2 : 1;

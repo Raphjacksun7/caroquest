@@ -33,7 +33,7 @@ app.prepare().then(async () => {
       },
       path: "/api/socketio/", 
       pingInterval: 25000, 
-      pingTimeout: 5000,   
+      pingTimeout: 60000,   // FIXED: Must be > pingInterval to prevent premature disconnections
     };
 
     const io = new SocketIOServer(httpServer, socketIoOptions);

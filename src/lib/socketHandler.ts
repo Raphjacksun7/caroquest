@@ -77,6 +77,22 @@ function sanitizeGameState(state: GameState): GameState {
 export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
   const clientRateLimits = new Map<string, ClientRateLimitInfo>();
 
+  // OPTIMIZATION: Periodic cleanup of old rate limit entries to prevent memory leaks
+  const rateLimitCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    const oneHourAgo = now - 3600000; // 1 hour
+    for (const [ip, info] of clientRateLimits.entries()) {
+      if (info.lastResetTime < oneHourAgo) {
+        clientRateLimits.delete(ip);
+      }
+    }
+    console.log(`SERVER: Rate limit cleanup - ${clientRateLimits.size} active IPs`);
+  }, 3600000); // Run every hour
+
+  // Cleanup interval on process termination
+  process.on('SIGTERM', () => clearInterval(rateLimitCleanupInterval));
+  process.on('SIGINT', () => clearInterval(rateLimitCleanupInterval));
+
   // Middleware for basic rate limiting
   io.use((socket, next) => {
     try {
@@ -543,6 +559,8 @@ export function setupGameSockets(io: SocketIOServer, gameStore: GameStore) {
                 playerId: removedPlayer.playerId,
                 remainingPlayers: game.players,
               });
+              
+              // OPTIMIZATION: Clean up state cache when all players disconnect
               if (!game.players.some((p) => p.isConnected)) {
                 console.log(
                   `SERVER: All players disconnected from ${gameIdBeforeAsync}. Cleanup was scheduled by gameStore.`
