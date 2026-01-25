@@ -1,8 +1,10 @@
 
 "use client";
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { GameState } from '@/lib/gameLogic'; 
+import type { GameState, PlayerId } from '@/lib/gameLogic'; 
 import type { Action as AIAction } from '@/lib/ai/mcts';
+import { createAI, getAIStats } from '@/lib/ai/enhancedMCTS';
+import { adaptiveDifficulty } from '@/lib/ai/adaptiveDifficulty';
 
 const workerCache = new Map<string, Worker>();
 
@@ -14,7 +16,7 @@ function createNewAIWorker(): Worker | undefined {
   return new Worker(new URL('../../public/workers/mcts-worker.js', import.meta.url), { type: 'module' });
 }
 
-export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
+export function useAI(difficulty: 'easy' | 'medium' | 'hard' | 'expert' = 'medium', aiPlayerId: PlayerId = 2) {
   const [aiWorker, setAiWorker] = useState<Worker | null>(null);
   const [isLoading, setIsLoading] = useState(true); 
   const [error, setError] = useState<string | null>(null);
@@ -100,38 +102,35 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' = 'medium') {
   }, [difficulty]);
 
   const calculateBestMove = useCallback(async (gameState: GameState): Promise<AIAction | null> => {
-    if (!aiWorker) {
-      const msg = "AI worker not initialized or failed to load.";
-      console.warn(msg); setError(msg); return null;
-    }
-    
-    if (currentMovePromiseRef.current) {
-      currentMovePromiseRef.current.reject(new Error("New AI move calculation started before the previous one finished."));
-      currentMovePromiseRef.current = null;
-    }
-    
-    setIsLoading(true); 
+    // Use enhanced AI directly instead of worker for better learning integration
+    setIsLoading(true);
     setError(null);
-
-    return new Promise((resolve, reject) => {
-      currentMovePromiseRef.current = { resolve, reject };
-      try {
-        const stateToSend = structuredClone(gameState);
-        aiWorker.postMessage({ gameState: stateToSend, difficulty });
-      } catch (e: any) {
-        const errMessage = e instanceof Error ? e.message : String(e);
-        console.error("Error posting message to AI worker:", errMessage);
-        setError(errMessage);
-        reject(new Error(errMessage));
-        currentMovePromiseRef.current = null; 
-        setIsLoading(false); 
+    
+    try {
+      const ai = createAI(gameState, difficulty, aiPlayerId);
+      const move = ai.findBestAction();
+      
+      // Record game outcome when game ends
+      if (gameState.winner !== null) {
+        ai.recordGameOutcome(gameState.winner);
       }
-    });
-  }, [aiWorker, difficulty]);
+      
+      setIsLoading(false);
+      return move;
+    } catch (e: any) {
+      const errMessage = e instanceof Error ? e.message : String(e);
+      console.error("Error calculating AI move:", errMessage);
+      setError(errMessage);
+      setIsLoading(false);
+      return null;
+    }
+  }, [difficulty, aiPlayerId]);
   
   return {
     calculateBestMove,
     isLoading, 
-    error
+    error,
+    getStats: getAIStats, // Export stats function
+    getPlayerMetrics: () => adaptiveDifficulty.getPlayerMetrics(),
   };
 }
