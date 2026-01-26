@@ -1154,12 +1154,6 @@ export function StrategicPawnsGame() {
                 onPawnDragStart={handlePawnDragStart}
                 onPawnDrop={handlePawnDrop}
               />
-              {gameMode === "ai" && isAILoading && (
-                <div className="mt-3 flex items-center text-sm text-muted-foreground">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {t("AIsTurn")}
-                </div>
-              )}
               {gameMode === "remote" &&
                 activeGameState &&
                 remoteLocalPlayerId && (

@@ -102,11 +102,6 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
             onPawnDragStart={onPawnDragStart}
             onPawnDrop={onPawnDrop}
           />
-          {isAILoading && (
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center rounded-lg">
-              <Loader2 className="h-8 w-8 animate-spin text-white" />
-            </div>
-          )}
         </div>
       </main>
 

@@ -10,9 +10,39 @@ import type {
   GameOptions,
 } from "./types";
 
+// Re-export types for convenience
+export type { GameState, PlayerId, SquareState, Pawn, SquareColor, GamePhase, GameOptions };
+
 export const BOARD_SIZE = 8;
 export const PAWNS_PER_PLAYER = 6;
 export const WINNING_LINE_LENGTH = 4;
+
+/**
+ * Deep clone a GameState, properly handling Set and Map objects
+ */
+export function cloneGameState(state: GameState): GameState {
+  return {
+    board: state.board.map(sq => ({
+      ...sq,
+      pawn: sq.pawn ? { ...sq.pawn } : null
+    })),
+    currentPlayerId: state.currentPlayerId,
+    playerColors: { ...state.playerColors },
+    gamePhase: state.gamePhase,
+    pawnsToPlace: { ...state.pawnsToPlace },
+    placedPawns: { ...state.placedPawns },
+    selectedPawnIndex: state.selectedPawnIndex,
+    blockedPawnsInfo: new Set(state.blockedPawnsInfo),
+    blockingPawnsInfo: new Set(state.blockingPawnsInfo),
+    deadZoneSquares: new Map(state.deadZoneSquares),
+    deadZoneCreatorPawnsInfo: new Set(state.deadZoneCreatorPawnsInfo),
+    winner: state.winner,
+    lastMove: state.lastMove ? { ...state.lastMove } : null,
+    winningLine: state.winningLine ? [...state.winningLine] : null,
+    highlightedValidMoves: state.highlightedValidMoves ? [...state.highlightedValidMoves] : undefined,
+    options: { ...state.options }
+  };
+}
 
 /**
  * Initializes the game board with alternating light and dark squares.

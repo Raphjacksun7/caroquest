@@ -1,151 +1,204 @@
-
 "use client";
-import { useState, useEffect, useCallback, useRef } from 'react';
+
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { GameState, PlayerId } from '@/lib/gameLogic'; 
-import type { Action as AIAction } from '@/lib/ai/mcts';
-import { createAI, getAIStats } from '@/lib/ai/enhancedMCTS';
-import { adaptiveDifficulty } from '@/lib/ai/adaptiveDifficulty';
 
-const workerCache = new Map<string, Worker>();
-
-function createNewAIWorker(): Worker | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-  // Updated path as per user suggestion
-  return new Worker(new URL('../../public/workers/mcts-worker.js', import.meta.url), { type: 'module' });
+/**
+ * AI Action type
+ */
+export interface AIAction {
+  type: "place" | "move" | "none";
+  squareIndex?: number;
+  fromIndex?: number;
+  toIndex?: number;
 }
 
-export function useAI(difficulty: 'easy' | 'medium' | 'hard' | 'expert' = 'medium', aiPlayerId: PlayerId = 2) {
-  const [aiWorker, setAiWorker] = useState<Worker | null>(null);
-  const [isLoading, setIsLoading] = useState(true); 
+/**
+ * Serialize game state for worker (convert Set/Map to arrays)
+ */
+function serializeGameState(state: GameState): object {
+  return {
+    board: state.board,
+    currentPlayerId: state.currentPlayerId,
+    playerColors: state.playerColors,
+    gamePhase: state.gamePhase,
+    pawnsToPlace: state.pawnsToPlace,
+    placedPawns: state.placedPawns,
+    selectedPawnIndex: state.selectedPawnIndex,
+    blockedPawnsInfo: Array.from(state.blockedPawnsInfo),
+    blockingPawnsInfo: Array.from(state.blockingPawnsInfo),
+    deadZoneSquares: Array.from(state.deadZoneSquares.entries()),
+    deadZoneCreatorPawnsInfo: Array.from(state.deadZoneCreatorPawnsInfo),
+    winner: state.winner,
+    lastMove: state.lastMove,
+    winningLine: state.winningLine,
+    options: state.options,
+  };
+}
+
+/**
+ * AI Hook using Web Worker for MCTS
+ * 
+ * Uses a dedicated web worker to run MCTS off the main thread,
+ * preventing UI freezing during AI computation.
+ */
+export function useAI(
+  difficulty: 'easy' | 'medium' | 'hard' | 'expert' = 'medium', 
+  aiPlayerId: PlayerId = 2
+) {
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const currentMovePromiseRef = useRef<{ resolve: (move: AIAction | null) => void, reject: (error: Error) => void } | null>(null);
-  
+  const workerRef = useRef<Worker | null>(null);
+  const promiseRef = useRef<{
+    resolve: (action: AIAction | null) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+
+  // Initialize worker
   useEffect(() => {
-    setIsLoading(true);
-    setError(null);
+    if (typeof window === 'undefined') return;
 
-    // Attempt to get from cache or create new
-    let workerInstance = workerCache.get(difficulty);
-    if (!workerInstance) {
-      try {
-        workerInstance = createNewAIWorker();
-        if (workerInstance) {
-          workerCache.set(difficulty, workerInstance);
-        } else {
-          console.error("Failed to create AI worker: not in a browser environment or worker path incorrect.");
-          setError("AI worker is not available or path is incorrect.");
-          setIsLoading(false);
-          return;
-        }
-      } catch (e: any) {
-        console.error("Failed to create AI worker (exception):", e);
-        setError(`Failed to initialize AI worker: ${e.message}. Check worker path and server logs.`);
-        setIsLoading(false);
-        return;
-      }
-    }
-    setAiWorker(workerInstance);
-    
-    const handleMessage = (event: MessageEvent<{ type: string, move?: AIAction, error?: string }>) => {
-      if (currentMovePromiseRef.current) {
-        if (event.data.type === 'MOVE_CALCULATED' && event.data.move !== undefined) {
-          currentMovePromiseRef.current.resolve(event.data.move);
-        } else if (event.data.type === 'ERROR' && event.data.error) {
-          console.error("AI Worker Error from message:", event.data.error);
-          currentMovePromiseRef.current.reject(new Error(event.data.error));
-        } else if (event.data.type === 'MOVE_CALCULATED' && event.data.move === undefined) { 
-          currentMovePromiseRef.current.resolve(null); 
-        } else {
-          console.warn('Unexpected message from AI worker:', event.data);
-          currentMovePromiseRef.current.reject(new Error('Unexpected message from AI worker'));
-        }
-        currentMovePromiseRef.current = null;
-      }
-      setIsLoading(false);
-    };
-
-    const handleError = (err: ErrorEvent) => {
-      console.error('AI Worker onerror:', err);
-      const errorMessage = `AI Worker failed: ${err.message || 'Unknown error'}. Ensure worker file exists at the correct public path.`;
-      setError(errorMessage);
-      setIsLoading(false);
-      if (currentMovePromiseRef.current) {
-        currentMovePromiseRef.current.reject(new Error(errorMessage));
-        currentMovePromiseRef.current = null;
-      }
-    };
-
-    if (workerInstance) {
-        const timerId = setTimeout(() => setIsLoading(false), 50); 
-        workerInstance.addEventListener('message', handleMessage);
-        workerInstance.addEventListener('error', handleError);
+    try {
+      const worker = new Worker('/workers/mcts-worker.js');
+      
+      worker.onmessage = (event) => {
+        const { type, move, error: workerError } = event.data;
         
-        return () => {
-          clearTimeout(timerId);
-          // Do not terminate cached workers here, or manage lifecycle differently
-          // For simplicity, let's assume workers are reused and not terminated per-hook instance
-          workerInstance?.removeEventListener('message', handleMessage);
-          workerInstance?.removeEventListener('error', handleError);
-          
-          if (currentMovePromiseRef.current) {
-            currentMovePromiseRef.current.reject(new Error("AI calculation cancelled."));
-            currentMovePromiseRef.current = null;
+        if (type === 'MOVE_CALCULATED') {
+          if (promiseRef.current) {
+            promiseRef.current.resolve(move || null);
+            promiseRef.current = null;
           }
-        };
-    } else {
-        setError("AI worker is not available.");
+          setIsLoading(false);
+        } else if (type === 'ERROR') {
+          console.error('AI Worker error:', workerError);
+          if (promiseRef.current) {
+            promiseRef.current.reject(new Error(workerError));
+            promiseRef.current = null;
+          }
+          setError(workerError);
+          setIsLoading(false);
+        }
+      };
+
+      worker.onerror = (event) => {
+        console.error('AI Worker error event:', event);
+        const errorMsg = event.message || 'Worker error';
+        setError(errorMsg);
         setIsLoading(false);
+        if (promiseRef.current) {
+          promiseRef.current.reject(new Error(errorMsg));
+          promiseRef.current = null;
+        }
+      };
+
+      workerRef.current = worker;
+      console.log('AI Worker initialized successfully');
+    } catch (e) {
+      console.error('Failed to create AI worker:', e);
+      setError('Failed to initialize AI worker');
     }
-    
-  }, [difficulty]);
+
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+      if (promiseRef.current) {
+        promiseRef.current.reject(new Error('Component unmounted'));
+        promiseRef.current = null;
+      }
+    };
+  }, []);
 
   const calculateBestMove = useCallback(async (gameState: GameState): Promise<AIAction | null> => {
-    // Use enhanced AI directly instead of worker for better learning integration
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      // Validate game state first
-      if (!gameState || !gameState.board || gameState.board.length !== 64) {
-        console.error("Invalid game state passed to AI:", gameState);
-        setError("Invalid game state");
-        setIsLoading(false);
-        return null;
-      }
-
-      const ai = createAI(gameState, difficulty, aiPlayerId);
-      const move = ai.findBestAction();
-      
-      // Validate move
-      if (!move || move.type === 'none') {
-        console.warn("AI returned no valid move");
-        setIsLoading(false);
-        return null;
-      }
-      
-      // Record game outcome when game ends
-      if (gameState.winner !== null) {
-        ai.recordGameOutcome(gameState.winner);
-      }
-      
-      setIsLoading(false);
-      return move;
-    } catch (e: any) {
-      const errMessage = e instanceof Error ? e.message : String(e);
-      console.error("Error calculating AI move:", errMessage, e);
-      setError(errMessage);
-      setIsLoading(false);
+    // Validate game state
+    if (!gameState || !gameState.board || gameState.board.length !== 64) {
+      console.error("useAI: Invalid game state");
       return null;
     }
+
+    // Verify it's the AI's turn
+    if (gameState.currentPlayerId !== aiPlayerId) {
+      console.error(`useAI: Not AI's turn. Current: ${gameState.currentPlayerId}, AI: ${aiPlayerId}`);
+      return null;
+    }
+
+    // Check if game is already over
+    if (gameState.winner !== null) {
+      console.log("useAI: Game already over");
+      return null;
+    }
+
+    // Check if worker is available
+    if (!workerRef.current) {
+      console.error("useAI: Worker not available, using fallback");
+      // Fallback to synchronous MCTS if worker unavailable
+      return fallbackCalculateMove(gameState, difficulty, aiPlayerId);
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    console.log(`useAI: Requesting move from worker - difficulty: ${difficulty}, phase: ${gameState.gamePhase}`);
+
+    return new Promise((resolve, reject) => {
+      promiseRef.current = { resolve, reject };
+      
+      // Serialize and send to worker
+      const serializedState = serializeGameState(gameState);
+      
+      workerRef.current!.postMessage({
+        type: 'CALCULATE_MOVE',
+        gameState: serializedState,
+        difficulty,
+        aiPlayerId,
+      });
+
+      // Timeout safety
+      setTimeout(() => {
+        if (promiseRef.current) {
+          console.warn('useAI: Worker timeout, using fallback');
+          promiseRef.current = null;
+          setIsLoading(false);
+          resolve(fallbackCalculateMove(gameState, difficulty, aiPlayerId));
+        }
+      }, 10000); // 10 second timeout
+    });
   }, [difficulty, aiPlayerId]);
-  
+
+  // Stats functions
+  const getStats = useCallback(() => ({
+    type: 'MCTS with Web Worker',
+    difficulty,
+    aiPlayerId,
+  }), [difficulty, aiPlayerId]);
+
+  const getPlayerMetrics = useCallback(() => ({
+    gamesPlayed: 0,
+    winRate: 0,
+    difficulty,
+  }), [difficulty]);
+
   return {
     calculateBestMove,
     isLoading, 
     error,
-    getStats: getAIStats, // Export stats function
-    getPlayerMetrics: () => adaptiveDifficulty.getPlayerMetrics(),
+    getStats,
+    getPlayerMetrics,
   };
+}
+
+/**
+ * Fallback synchronous move calculation if worker unavailable
+ */
+function fallbackCalculateMove(
+  gameState: GameState,
+  difficulty: string,
+  aiPlayerId: PlayerId
+): AIAction | null {
+  // Import dynamically to avoid circular dependencies
+  const { createMCTS } = require('@/lib/ai/mcts');
+  const mcts = createMCTS(difficulty, aiPlayerId);
+  return mcts.findBestAction(gameState);
 }

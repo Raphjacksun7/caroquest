@@ -9,6 +9,7 @@ import {
   highlightValidMoves,
   clearHighlights,
   PAWNS_PER_PLAYER,
+  cloneGameState,
 } from "@/lib/gameLogic";
 import { useAI } from "@/hooks/useAI";
 import { useToast } from "@/hooks/use-toast";
@@ -42,16 +43,48 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
     ) {
       const timerId = setTimeout(async () => {
         if (!localGameState) return;
-        console.log("CLIENT (AI Hook): AI's turn. Calculating move...");
-        const clonedState = structuredClone(localGameState);
+        console.log("CLIENT (AI Hook): AI's turn. Calculating move...", {
+          phase: localGameState.gamePhase,
+          currentPlayer: localGameState.currentPlayerId,
+          blockedPawnsSize: localGameState.blockedPawnsInfo.size,
+          deadZonesSize: localGameState.deadZoneSquares.size
+        });
+        const clonedState = cloneGameState(localGameState);
+        console.log("CLIENT (AI Hook): Cloned state:", {
+          phase: clonedState.gamePhase,
+          blockedPawnsSize: clonedState.blockedPawnsInfo.size,
+          deadZonesSize: clonedState.deadZoneSquares.size
+        });
         const aiAction = await calculateBestMove(clonedState);
 
-        if (!aiAction || !localGameState) {
-          console.error("CLIENT (AI Hook): AI returned null/invalid move or game state invalid");
+        console.log("CLIENT (AI Hook): AI action received:", JSON.stringify(aiAction));
+
+        // Strict validation
+        if (!aiAction) {
+          console.error("CLIENT (AI Hook): AI returned null/undefined");
           return;
         }
         
-        console.log("CLIENT (AI Hook): AI action received:", aiAction);
+        if (typeof aiAction !== 'object') {
+          console.error("CLIENT (AI Hook): AI returned non-object:", typeof aiAction);
+          return;
+        }
+        
+        if (Object.keys(aiAction).length === 0) {
+          console.error("CLIENT (AI Hook): AI returned empty object {}");
+          return;
+        }
+        
+        if (!aiAction.type || aiAction.type === 'none') {
+          console.error("CLIENT (AI Hook): AI returned invalid type:", aiAction.type);
+          return;
+        }
+        
+        if (!localGameState) {
+          console.error("CLIENT (AI Hook): Game state became null");
+          return;
+        }
+        
         let nextState: GameState | null = null;
         const actingPlayerIdForAI = clonedState.currentPlayerId;
 
