@@ -11,8 +11,6 @@ import type { GameState, GameMode, PlayerId } from "@/lib/types";
 import { InfoBox } from "./InfoBox";
 import { useInfoSystem } from "@/hooks/useInfoSystem";
 import { useGameConnection } from "@/hooks/useGameConnection";
-import { Button } from "@/components/ui/button";
-import { RotateCcw } from "lucide-react";
 
 interface TopPanelMobileProps {
   gameState: GameState;
@@ -362,20 +360,15 @@ export const TopPanelMobile: React.FC<TopPanelMobileProps> = ({
           <InfoBox key={info.id} data={info} />
         ))}
         
-        {/* Rematch/Play Again Button - Show when game is over */}
+        {/* Rematch Button - Show when game is over */}
         {hasWinner && (
-          <Button
+          <button
             onClick={handlePlayAgain}
             disabled={isRequestingRematch}
-            className="w-full max-w-xs"
-            size="lg"
+            className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold py-4 px-6 rounded-lg transition-colors text-lg w-full max-w-xs disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <RotateCcw className="mr-2 h-4 w-4" />
-            {gameMode === "remote" 
-              ? (isRequestingRematch ? "Requesting..." : "Request Rematch")
-              : "Play Again"
-            }
-          </Button>
+            {isRequestingRematch ? "Requesting..." : "Rematch"}
+          </button>
         )}
       </div>
     );
