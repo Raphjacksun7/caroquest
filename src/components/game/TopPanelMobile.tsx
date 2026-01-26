@@ -11,6 +11,8 @@ import type { GameState, GameMode, PlayerId } from "@/lib/types";
 import { InfoBox } from "./InfoBox";
 import { useInfoSystem } from "@/hooks/useInfoSystem";
 import { useGameConnection } from "@/hooks/useGameConnection";
+import { Button } from "@/components/ui/button";
+import { RotateCcw } from "lucide-react";
 
 interface TopPanelMobileProps {
   gameState: GameState;
@@ -309,6 +311,40 @@ export const TopPanelMobile: React.FC<TopPanelMobileProps> = ({
     clearInfosByType,
   ]);
 
+  // Handle rematch/play again button click
+  const [isRequestingRematch, setIsRequestingRematch] = useState(false);
+
+  const handlePlayAgain = useCallback(() => {
+    if (gameMode === "remote") {
+      // For remote games, request rematch through socket
+      setIsRequestingRematch(true);
+      try {
+        gameConnection.requestRematch();
+        addTemporaryInfo(
+          {
+            type: "info",
+            message: "Rematch request sent...",
+          },
+          3000
+        );
+      } catch (error) {
+        console.error("CLIENT: Error requesting rematch:", error);
+        addTemporaryInfo(
+          {
+            type: "error",
+            message: "Failed to request rematch",
+          },
+          3000
+        );
+      }
+      // Reset after a delay
+      setTimeout(() => setIsRequestingRematch(false), 3000);
+    } else {
+      // For local/AI games, just reset
+      onResetGame();
+    }
+  }, [gameMode, gameConnection, onResetGame, addTemporaryInfo]);
+
   // Mobile InfoBox Display - show important infos (centered)
   const MobileInfoDisplay = () => {
     const mobileInfos = infos.filter(
@@ -318,13 +354,29 @@ export const TopPanelMobile: React.FC<TopPanelMobileProps> = ({
         info.type === "success"
     );
 
-    if (mobileInfos.length === 0) return null;
+    if (mobileInfos.length === 0 && !hasWinner) return null;
 
     return (
-      <div className="w-full px-4 pb-2 space-y-2 flex flex-col items-center">
+      <div className="w-full px-4 pb-2 space-y-3 flex flex-col items-center">
         {mobileInfos.map((info) => (
           <InfoBox key={info.id} data={info} />
         ))}
+        
+        {/* Rematch/Play Again Button - Show when game is over */}
+        {hasWinner && (
+          <Button
+            onClick={handlePlayAgain}
+            disabled={isRequestingRematch}
+            className="w-full max-w-xs"
+            size="lg"
+          >
+            <RotateCcw className="mr-2 h-4 w-4" />
+            {gameMode === "remote" 
+              ? (isRequestingRematch ? "Requesting..." : "Request Rematch")
+              : "Play Again"
+            }
+          </Button>
+        )}
       </div>
     );
   };
