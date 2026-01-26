@@ -46,35 +46,42 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
         const clonedState = structuredClone(localGameState);
         const aiAction = await calculateBestMove(clonedState);
 
-        if (aiAction && localGameState) {
-          console.log("CLIENT (AI Hook): AI action received:", aiAction);
-          let nextState: GameState | null = null;
-          const actingPlayerIdForAI = clonedState.currentPlayerId;
+        if (!aiAction || !localGameState) {
+          console.error("CLIENT (AI Hook): AI returned null/invalid move or game state invalid");
+          return;
+        }
+        
+        console.log("CLIENT (AI Hook): AI action received:", aiAction);
+        let nextState: GameState | null = null;
+        const actingPlayerIdForAI = clonedState.currentPlayerId;
 
-          if (aiAction.type === "place" && aiAction.squareIndex !== undefined) {
-            nextState = placePawnLogic(
-              localGameState,
-              aiAction.squareIndex,
-              actingPlayerIdForAI
-            );
-          } else if (
-            aiAction.type === "move" &&
-            aiAction.fromIndex !== undefined &&
-            aiAction.toIndex !== undefined
-          ) {
-            nextState = movePawnLogic(
-              localGameState,
-              aiAction.fromIndex,
-              aiAction.toIndex,
-              actingPlayerIdForAI
-            );
-          }
-          if (nextState) {
-            console.log("CLIENT (AI Hook): Applying AI move. New turn:", nextState.currentPlayerId);
-            setLocalGameState(nextState);
-          } else {
-            console.error("CLIENT (AI Hook): AI made an invalid or null move:", aiAction);
-          }
+        if (aiAction.type === "place" && aiAction.squareIndex !== undefined) {
+          nextState = placePawnLogic(
+            localGameState,
+            aiAction.squareIndex,
+            actingPlayerIdForAI
+          );
+        } else if (
+          aiAction.type === "move" &&
+          aiAction.fromIndex !== undefined &&
+          aiAction.toIndex !== undefined
+        ) {
+          nextState = movePawnLogic(
+            localGameState,
+            aiAction.fromIndex,
+            aiAction.toIndex,
+            actingPlayerIdForAI
+          );
+        } else {
+          console.error("CLIENT (AI Hook): AI action has invalid format:", aiAction);
+          return;
+        }
+        
+        if (nextState) {
+          console.log("CLIENT (AI Hook): Applying AI move. New turn:", nextState.currentPlayerId);
+          setLocalGameState(nextState);
+        } else {
+          console.error("CLIENT (AI Hook): Move resulted in null state. Action was:", aiAction);
         }
       }, 700);
       return () => clearTimeout(timerId);

@@ -107,8 +107,23 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' | 'expert' = 'mediu
     setError(null);
     
     try {
+      // Validate game state first
+      if (!gameState || !gameState.board || gameState.board.length !== 64) {
+        console.error("Invalid game state passed to AI:", gameState);
+        setError("Invalid game state");
+        setIsLoading(false);
+        return null;
+      }
+
       const ai = createAI(gameState, difficulty, aiPlayerId);
       const move = ai.findBestAction();
+      
+      // Validate move
+      if (!move || move.type === 'none') {
+        console.warn("AI returned no valid move");
+        setIsLoading(false);
+        return null;
+      }
       
       // Record game outcome when game ends
       if (gameState.winner !== null) {
@@ -119,7 +134,7 @@ export function useAI(difficulty: 'easy' | 'medium' | 'hard' | 'expert' = 'mediu
       return move;
     } catch (e: any) {
       const errMessage = e instanceof Error ? e.message : String(e);
-      console.error("Error calculating AI move:", errMessage);
+      console.error("Error calculating AI move:", errMessage, e);
       setError(errMessage);
       setIsLoading(false);
       return null;
