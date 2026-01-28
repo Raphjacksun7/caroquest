@@ -785,6 +785,23 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   </span>
                 </button>
 
+                                {/* Redo button - only shown for local/AI modes, hidden for online */}
+                                {gameMode !== "remote" && (
+                  <button
+                    onClick={handleRedoClick}
+                    disabled={!canRedo || hasWinner}
+                    className={`flex flex-col items-center gap-2 transition-colors ${
+                      canRedo && !hasWinner
+                        ? "text-gray-600 hover:text-gray-950"
+                        : "text-gray-300 cursor-not-allowed"
+                    }`}
+                    title={canRedo ? (t("redo") || "Redo") : (t("noMovesToRedo") || "No moves to redo")}
+                  >
+                    <Redo2 className="h-6 w-6" />
+                    <span className="text-sm">{t("redo") || "Redo"}</span>
+                  </button>
+                )}
+
                 <button
                   onClick={handleLanguageSwitch}
                   className="flex flex-col items-center gap-2 text-gray-600 hover:text-gray-950 transition-colors"
@@ -801,22 +818,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   <span className="text-sm text-gray-700">Report a bug</span>
                 </button>
 
-                {/* Redo button - only shown for local/AI modes, hidden for online */}
-                {gameMode !== "remote" && (
-                  <button
-                    onClick={handleRedoClick}
-                    disabled={!canRedo || hasWinner}
-                    className={`flex flex-col items-center gap-2 transition-colors ${
-                      canRedo && !hasWinner
-                        ? "text-gray-600 hover:text-gray-950"
-                        : "text-gray-300 cursor-not-allowed"
-                    }`}
-                    title={canRedo ? (t("redo") || "Redo") : (t("noMovesToRedo") || "No moves to redo")}
-                  >
-                    <Redo2 className="h-6 w-6" />
-                    <span className="text-sm">{t("redo") || "Redo"}</span>
-                  </button>
-                )}
+
               </div>
             </div>
 
