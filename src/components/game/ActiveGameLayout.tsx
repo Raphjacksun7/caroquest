@@ -78,7 +78,7 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
 
   const MobileAlert = () => (
     <div className="lg:hidden p-4">
-      {showMobileAlert && (
+      {/* {showMobileAlert && (
         <Alert className="border-orange-200 bg-orange-50">
           <Smartphone className="h-4 w-4 text-orange-600" />
           <AlertDescription className="text-orange-800 pr-8">
@@ -94,7 +94,7 @@ export const ActiveGameLayout: React.FC<ActiveGameLayoutProps> = ({
             <X className="h-4 w-4" />
           </Button>
         </Alert>
-      )}
+      )} */}
     </div>
   );
 
