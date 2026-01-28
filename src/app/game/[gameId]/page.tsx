@@ -63,7 +63,7 @@ export default function RemoteGamePage() {
     setRemotePlayerNameInput,
     remoteGameIdInput,
     setRemoteGameIdInput,
-    currentAiDifficulty,
+    currentAiStrategy,
   } = useGameSetup({ gameIdFromUrl: gameId });
 
   const { t, currentLanguage, setLanguage } = useTranslation();
@@ -78,7 +78,7 @@ export default function RemoteGamePage() {
     localGameState,
     isAILoading,
   } = useLocalGame({
-    aiDifficulty: currentAiDifficulty,
+    aiStrategy: currentAiStrategy,
     gameMode: currentGameMode,
     initialOptions: initialGameOptions,
   });
@@ -105,8 +105,9 @@ export default function RemoteGamePage() {
         setIsAutoRejoining(true);
         setCurrentGameMode("remote");
         
+        // Pass player name directly to avoid state race condition
         setTimeout(() => {
-          handleStartGameMode("remote");
+          handleStartGameMode("remote", savedPlayerName);
         }, 300);
       } else {
         // New joiner
@@ -208,24 +209,27 @@ export default function RemoteGamePage() {
   }, [gameConnection.players, t]);
 
   const handleStartGameMode = useCallback(
-    async (mode: GameMode) => {
+    async (mode: GameMode, overridePlayerName?: string) => {
       if (mode !== "remote") return;
       
       console.log("REMOTE GAME: Starting remote game mode");
       
-      if (!remotePlayerNameInput.trim()) {
+      // Use override name if provided (for auto-rejoin), otherwise use input state
+      const playerName = overridePlayerName?.trim() || remotePlayerNameInput.trim();
+      
+      if (!playerName) {
         console.error("REMOTE GAME: Player name required");
         return;
       }
       
       // Save player name for refresh scenarios
-      save(`player_${gameId}`, remotePlayerNameInput.trim());
+      save(`player_${gameId}`, playerName);
       
       try {
         await gameConnection.connectSocketIO();
         await gameConnection.joinGame(
           gameId,
-          remotePlayerNameInput.trim(),
+          playerName,
           initialGameOptions
         );
       } catch (err) {
@@ -401,8 +405,8 @@ export default function RemoteGamePage() {
     setRemotePlayerNameInput,
     remoteGameIdInput,
     setRemoteGameIdInput,
-    aiDifficulty: currentAiDifficulty,
-    setAiDifficulty: () => {},
+    aiStrategy: currentAiStrategy,
+    setAiStrategy: () => {},
     isConnecting: gameConnection.isConnecting,
     gameConnectionError: gameConnection.error,
     isFromSharedLink: true,

@@ -28,7 +28,7 @@ export default function LocalGamePage() {
     setPlayer1NameLocal,
     player2NameLocal,
     setPlayer2NameLocal,
-    currentAiDifficulty,
+    currentAiStrategy,
   } = useGameSetup({ gameIdFromUrl: "" });
 
   const { t, currentLanguage, setLanguage } = useTranslation();
@@ -45,8 +45,12 @@ export default function LocalGamePage() {
     handleLocalPawnDragStart,
     handleLocalPawnDrop,
     resetLocalGame,
+    handleUndo,
+    handleRedo,
+    canUndo,
+    canRedo,
   } = useLocalGame({
-    aiDifficulty: currentAiDifficulty,
+    aiStrategy: currentAiStrategy,
     gameMode,
     initialOptions: initialGameOptions,
   });
@@ -104,8 +108,8 @@ export default function LocalGamePage() {
     setRemotePlayerNameInput: () => {},
     remoteGameIdInput: "",
     setRemoteGameIdInput: () => {},
-    aiDifficulty: currentAiDifficulty,
-    setAiDifficulty: () => {},
+    aiStrategy: currentAiStrategy,
+    setAiStrategy: () => {},
     isConnecting: false,
     gameConnectionError: null,
     isFromSharedLink: false,
@@ -128,6 +132,11 @@ export default function LocalGamePage() {
     onCopyGameLink: () => {},
     onGoBackToMenu: goBackToMenu,
     onSetLanguage: setLanguage,
+    // Undo/Redo for local game
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    canUndo,
+    canRedo,
   };
 
   return (

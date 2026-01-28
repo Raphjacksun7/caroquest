@@ -13,9 +13,11 @@ import {
   ExternalLink, 
   Gamepad2,
   Swords,
-  Trophy
+  Trophy,
+  Shield
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import type { AIStrategy } from '@/lib/types';
 
 interface SelectScreenProps {
   onStartGameMode: (mode: "local" | "ai" | "remote") => Promise<void>;
@@ -27,8 +29,8 @@ interface SelectScreenProps {
   setRemotePlayerNameInput: (name: string) => void;
   remoteGameIdInput: string;
   setRemoteGameIdInput: (id: string) => void;
-  aiDifficulty: 'easy' | 'medium' | 'hard';
-  setAiDifficulty: (difficulty: 'easy' | 'medium' | 'hard') => void;
+  aiStrategy: AIStrategy;
+  setAiStrategy: (strategy: AIStrategy) => void;
   isConnecting: boolean;
   gameConnectionError: string | null;
   isFromSharedLink?: boolean;
@@ -45,8 +47,8 @@ export const SelectScreen: React.FC<SelectScreenProps> = ({
   setRemotePlayerNameInput,
   remoteGameIdInput,
   setRemoteGameIdInput,
-  aiDifficulty,
-  setAiDifficulty,
+  aiStrategy,
+  setAiStrategy,
   isConnecting,
   gameConnectionError,
   isFromSharedLink = false,
@@ -254,22 +256,36 @@ export const SelectScreen: React.FC<SelectScreenProps> = ({
                 </div>
 
                 <div>
-                  <Label className="text-sm font-medium text-gray-700">Wizard Difficulty</Label>
-                  <div className="grid grid-cols-3 gap-2 mt-2">
-                    {(['easy', 'medium', 'hard'] as const).map((level) => (
-                      <Button
-                        key={level}
-                        variant={aiDifficulty === level ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setAiDifficulty(level)}
-                        className={aiDifficulty === level 
-                          ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                        }
-                      >
-                        {level.charAt(0).toUpperCase() + level.slice(1)}
-                      </Button>
-                    ))}
+                  <Label className="text-sm font-medium text-gray-700">{t('aiStrategy')}</Label>
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <button
+                      onClick={() => setAiStrategy('normal')}
+                      className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all ${
+                        aiStrategy === 'normal'
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:border-blue-300'
+                      }`}
+                    >
+                      <Swords className={`h-6 w-6 ${aiStrategy === 'normal' ? 'text-blue-600' : 'text-gray-600'}`} />
+                      <span className={`font-medium text-sm ${aiStrategy === 'normal' ? 'text-blue-700' : 'text-gray-700'}`}>
+                        {t('strategyNormal')}
+                      </span>
+                      <span className="text-xs text-gray-500 text-center">{t('strategyNormalDesc')}</span>
+                    </button>
+                    <button
+                      onClick={() => setAiStrategy('aggressive')}
+                      className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all ${
+                        aiStrategy === 'aggressive'
+                          ? 'border-red-500 bg-red-50'
+                          : 'border-gray-200 hover:border-red-300'
+                      }`}
+                    >
+                      <Shield className={`h-6 w-6 ${aiStrategy === 'aggressive' ? 'text-red-600' : 'text-gray-600'}`} />
+                      <span className={`font-medium text-sm ${aiStrategy === 'aggressive' ? 'text-red-700' : 'text-gray-700'}`}>
+                        {t('strategyAggressive')}
+                      </span>
+                      <span className="text-xs text-gray-500 text-center">{t('strategyAggressiveDesc')}</span>
+                    </button>
                   </div>
                 </div>
 

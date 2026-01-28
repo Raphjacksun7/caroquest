@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { AIDifficulty } from "@/lib/types";
+import type { AIStrategy } from "@/lib/types";
 
 interface UseGameSetupProps {
   gameIdFromUrl?: string;
@@ -12,7 +12,7 @@ export function useGameSetup(props?: UseGameSetupProps) {
   const [player2NameLocal, setPlayer2NameLocal] = useState<string>("");
   const [remotePlayerNameInput, setRemotePlayerNameInput] = useState<string>("");
   const [remoteGameIdInput, setRemoteGameIdInput] = useState<string>(props?.gameIdFromUrl || "");
-  const [currentAiDifficulty, setCurrentAiDifficulty] = useState<AIDifficulty>("medium");
+  const [currentAiStrategy, setCurrentAiStrategy] = useState<AIStrategy>("normal");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -37,6 +37,6 @@ export function useGameSetup(props?: UseGameSetupProps) {
     player2NameLocal, setPlayer2NameLocal,
     remotePlayerNameInput, setRemotePlayerNameInput,
     remoteGameIdInput, setRemoteGameIdInput,
-    currentAiDifficulty, setCurrentAiDifficulty,
+    currentAiStrategy, setCurrentAiStrategy,
   };
 }

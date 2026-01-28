@@ -41,9 +41,12 @@ function serializeGameState(state: GameState): object {
  * 
  * Uses a dedicated web worker to run MCTS off the main thread,
  * preventing UI freezing during AI computation.
+ * 
+ * @param strategy - AI strategy mode: 'normal' (balanced) or 'aggressive' (defensive-first)
+ * @param aiPlayerId - Which player the AI controls
  */
 export function useAI(
-  difficulty: 'easy' | 'medium' | 'hard' | 'expert' = 'medium', 
+  strategy: 'normal' | 'aggressive' = 'normal', 
   aiPlayerId: PlayerId = 2
 ) {
   const [isLoading, setIsLoading] = useState(false);
@@ -134,13 +137,13 @@ export function useAI(
     if (!workerRef.current) {
       console.error("useAI: Worker not available, using fallback");
       // Fallback to synchronous MCTS if worker unavailable
-      return fallbackCalculateMove(gameState, difficulty, aiPlayerId);
+      return fallbackCalculateMove(gameState, strategy, aiPlayerId);
     }
 
     setIsLoading(true);
     setError(null);
 
-    console.log(`useAI: Requesting move from worker - difficulty: ${difficulty}, phase: ${gameState.gamePhase}`);
+    console.log(`useAI: Requesting move from worker - strategy: ${strategy}, phase: ${gameState.gamePhase}`);
 
     return new Promise((resolve, reject) => {
       promiseRef.current = { resolve, reject };
@@ -151,7 +154,7 @@ export function useAI(
       workerRef.current!.postMessage({
         type: 'CALCULATE_MOVE',
         gameState: serializedState,
-        difficulty,
+        strategy,
         aiPlayerId,
       });
 
@@ -161,24 +164,24 @@ export function useAI(
           console.warn('useAI: Worker timeout, using fallback');
           promiseRef.current = null;
           setIsLoading(false);
-          resolve(fallbackCalculateMove(gameState, difficulty, aiPlayerId));
+          resolve(fallbackCalculateMove(gameState, strategy, aiPlayerId));
         }
       }, 10000); // 10 second timeout
     });
-  }, [difficulty, aiPlayerId]);
+  }, [strategy, aiPlayerId]);
 
   // Stats functions
   const getStats = useCallback(() => ({
     type: 'MCTS with Web Worker',
-    difficulty,
+    strategy,
     aiPlayerId,
-  }), [difficulty, aiPlayerId]);
+  }), [strategy, aiPlayerId]);
 
   const getPlayerMetrics = useCallback(() => ({
     gamesPlayed: 0,
     winRate: 0,
-    difficulty,
-  }), [difficulty]);
+    strategy,
+  }), [strategy]);
 
   return {
     calculateBestMove,
@@ -194,11 +197,11 @@ export function useAI(
  */
 function fallbackCalculateMove(
   gameState: GameState,
-  difficulty: string,
+  strategy: string,
   aiPlayerId: PlayerId
 ): AIAction | null {
   // Import dynamically to avoid circular dependencies
   const { createMCTS } = require('@/lib/ai/mcts');
-  const mcts = createMCTS(difficulty, aiPlayerId);
+  const mcts = createMCTS(strategy, aiPlayerId);
   return mcts.findBestAction(gameState);
 }

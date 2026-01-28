@@ -126,10 +126,53 @@ export interface StoredPlayer {
 export type GameMode = "ai" | "local" | "remote" | "select";
 
 /**
- * Defines the difficulty levels for the AI opponent.
+ * Defines the strategic modes for the AI opponent.
+ * - 'normal': Balanced play with quick decisions, good at defensive placement
+ * - 'aggressive': Defensive-first strategy, prioritizes blocking over winning
  */
-export type AIDifficulty = "easy" | "medium" | "hard";
+export type AIStrategy = "normal" | "aggressive";
 
+/**
+ * Represents a single action that can be undone/redone.
+ */
+export interface GameAction {
+  type: 'place' | 'move';
+  squareIndex?: number;  // For placement
+  fromIndex?: number;    // For movement
+  toIndex?: number;      // For movement
+}
+
+/**
+ * Represents a single entry in the game history for undo/redo functionality.
+ */
+export interface HistoryEntry {
+  /** The complete game state at this point */
+  gameState: GameState;
+  /** The action that led to this state (null for initial state) */
+  action: GameAction | null;
+  /** The player who performed the action */
+  playerId: PlayerId | null;
+  /** Timestamp when the action was performed */
+  timestamp: number;
+  /** Move number in the game */
+  moveNumber: number;
+}
+
+/**
+ * Undo request status for online games
+ */
+export type UndoRequestStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+
+/**
+ * Undo request data for online multiplayer
+ */
+export interface UndoRequest {
+  requestId: string;
+  requestedBy: PlayerId;
+  requestedAt: number;
+  status: UndoRequestStatus;
+  movesToUndo: number; // How many moves to undo (1 for normal, 2 for AI mode)
+}
 
 export type Locale = 'en' | 'fr'; // Extend this as needed for more languages
 

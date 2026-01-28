@@ -3,13 +3,13 @@
 import type { Action } from '@/lib/ai/mcts';
 import React, { useEffect, useCallback } from 'react';
 import { useAI } from '@/hooks/useAI'; 
-import { GameState, PlayerId } from '@/lib/types';
+import { GameState, PlayerId, AIStrategy } from '@/lib/types';
 
 interface AIControllerProps {
   gameState: GameState;
   aiPlayerId: PlayerId;
   onAIMove: (action: Action | null) => void; // Allow null if AI fails or no move
-  difficulty: 'easy' | 'medium' | 'hard';
+  strategy: AIStrategy;
   isThinking: boolean;
   setIsThinking: (isThinking: boolean) => void;
   onAIError?: (errorMsg: string) => void;
@@ -19,12 +19,12 @@ export function AIController({
   gameState, 
   aiPlayerId, 
   onAIMove, 
-  difficulty,
+  strategy,
   isThinking,
   setIsThinking,
   onAIError
 }: AIControllerProps) {
-  const { calculateBestMove, isLoading: isAILoading, error: aiHookError } = useAI(difficulty);
+  const { calculateBestMove, isLoading: isAILoading, error: aiHookError } = useAI(strategy);
 
   useEffect(() => {
     if (aiHookError && onAIError) {

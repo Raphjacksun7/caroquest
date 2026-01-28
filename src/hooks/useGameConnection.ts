@@ -92,6 +92,19 @@ interface ServerToClientEvents {
     options: GameOptions;
   }) => void;
   rematch_declined: (data: { declinedBy: string; playerName: string }) => void;
+  // Undo events
+  undo_requested: (data: {
+    requestedBy: string;
+    playerName: string;
+    movesToUndo: number;
+    requesterId: PlayerId;
+  }) => void;
+  undo_applied: (data: {
+    gameState: ArrayBuffer;
+    options: GameOptions;
+    undoneByPlayer: PlayerId;
+  }) => void;
+  undo_declined: (data: { declinedBy: string; playerName: string }) => void;
   connect: () => void;
   connect_error: (err: Error) => void;
   disconnect: (reason: Socket.DisconnectReason) => void;
@@ -133,6 +146,14 @@ interface ClientToServerEvents {
   respond_rematch: (data: {
     gameId: string;
     accepted: boolean;
+    clientTimestamp: number;
+  }) => void;
+  // Undo events
+  request_undo: (data: { gameId: string; clientTimestamp: number }) => void;
+  respond_undo: (data: {
+    gameId: string;
+    accepted: boolean;
+    movesToUndo: number;
     clientTimestamp: number;
   }) => void;
 }
@@ -710,6 +731,36 @@ export function useGameConnection() {
 
       socket.on("rematch_requested", ({ requestedBy, playerName }) => {
         // This is handled by SidePanel
+      });
+
+      socket.on("undo_requested", ({ requestedBy, playerName, undoCount }) => {
+        // This is handled by SidePanel
+        console.log(`CLIENT: Undo requested by ${playerName} (${undoCount} moves available)`);
+      });
+
+      socket.on(
+        "undo_applied",
+        ({ gameState: compressedState, options, undoneByPlayer }) => {
+          console.log(
+            `CLIENT: Undo applied, restoring state from P${undoneByPlayer}'s turn`
+          );
+
+          const decodedState = handleAndDeserializeState(
+            compressedState,
+            "undo_applied"
+          );
+          if (decodedState) {
+            setGameState({ ...decodedState, options });
+            console.log(
+              `CLIENT: Undo applied. Current turn: P${decodedState.currentPlayerId}`
+            );
+          }
+        }
+      );
+
+      socket.on("undo_declined", ({ declinedBy, playerName }) => {
+        // This is handled by SidePanel
+        console.log(`CLIENT: Undo declined by ${playerName}`);
       });
 
       socket.on(
@@ -1305,6 +1356,140 @@ export function useGameConnection() {
     [getAdjustedTime, setError, persistedSocket]
   );
 
+  const requestUndo = useCallback(() => {
+    console.log("CLIENT: requestUndo called");
+
+    // Try EVERY possible method to get the socket (same as rematch)
+    let currentSocket = socketRef.current;
+
+    if (!currentSocket) {
+      currentSocket = persistedSocket;
+    }
+    if (!currentSocket) {
+      currentSocket = (window as any).globalSocket;
+    }
+    if (!currentSocket) {
+      currentSocket = (window as any).persistedSocket;
+    }
+    if (!currentSocket) {
+      currentSocket = gameStore.getState()._internalSocketRef?.current || null;
+    }
+
+    const currentLobbyId = gameStore.getState().gameId;
+
+    console.log("CLIENT: requestUndo debug:", {
+      socketConnected: currentSocket?.connected,
+      socketId: currentSocket?.id,
+      gameId: currentLobbyId,
+    });
+
+    if (!currentSocket) {
+      console.error("CLIENT: CRITICAL - No socket found for undo request");
+      setError(
+        "Socket connection lost. Please refresh the page.",
+        "SERVER_ERROR"
+      );
+      return;
+    }
+
+    if (!currentSocket.connected) {
+      console.error("CLIENT: Socket found but not connected");
+      setError("Connection lost. Please refresh the page.", "SERVER_ERROR");
+      return;
+    }
+
+    if (!currentLobbyId) {
+      console.error("CLIENT: No game ID found for undo request");
+      setError("Game session lost. Please start a new game.", "SERVER_ERROR");
+      return;
+    }
+
+    console.log(
+      `CLIENT: Requesting undo for game ${currentLobbyId} via socket ${currentSocket.id}`
+    );
+
+    try {
+      currentSocket.emit("request_undo", {
+        gameId: currentLobbyId,
+        clientTimestamp: getAdjustedTime(),
+      });
+      console.log("CLIENT: Undo request sent successfully");
+    } catch (error: any) {
+      console.error("CLIENT: Error sending undo request:", error);
+      setError(
+        `Failed to send undo request: ${error.message}`,
+        "SERVER_ERROR"
+      );
+    }
+  }, [getAdjustedTime, setError, persistedSocket]);
+
+  const respondToUndo = useCallback(
+    (accepted: boolean, movesToUndo: number = 1) => {
+      console.log(`CLIENT: respondToUndo called with: ${accepted}, movesToUndo: ${movesToUndo}`);
+
+      // Try EVERY possible method to get the socket (same as rematch)
+      let currentSocket = socketRef.current;
+
+      if (!currentSocket) {
+        currentSocket = persistedSocket;
+      }
+      if (!currentSocket) {
+        currentSocket = (window as any).globalSocket;
+      }
+      if (!currentSocket) {
+        currentSocket = (window as any).persistedSocket;
+      }
+      if (!currentSocket) {
+        currentSocket =
+          gameStore.getState()._internalSocketRef?.current || null;
+      }
+
+      const currentLobbyId = gameStore.getState().gameId;
+
+      console.log("CLIENT: respondToUndo debug:", {
+        socketConnected: currentSocket?.connected,
+        socketId: currentSocket?.id,
+        gameId: currentLobbyId,
+        accepted,
+        movesToUndo,
+      });
+
+      if (!currentSocket?.connected || !currentLobbyId) {
+        console.error(
+          "CLIENT: Cannot respond to undo - connection/game issue"
+        );
+        setError(
+          "Connection issue. Cannot respond to undo request.",
+          "SERVER_ERROR"
+        );
+        return;
+      }
+
+      console.log(
+        `CLIENT: Responding to undo request: ${
+          accepted ? "accepted" : "declined"
+        } (${movesToUndo} moves)`
+      );
+
+      try {
+        currentSocket.emit("respond_undo", {
+          gameId: currentLobbyId,
+          accepted,
+          movesToUndo,
+          clientTimestamp: getAdjustedTime(),
+        });
+        console.log("CLIENT: Undo response sent successfully");
+      } catch (error: any) {
+        console.error("CLIENT: Error sending undo response:", error);
+        setError(
+          `Failed to respond to undo: ${error.message}`,
+          "SERVER_ERROR"
+        );
+      }
+    },
+    [getAdjustedTime, setError, persistedSocket]
+  );
+
   useEffect(() => {
     return () => {
       console.log(
@@ -1352,6 +1537,8 @@ export function useGameConnection() {
     leaveMatchmakingQueue,
     respondToRematch,
     requestRematch,
+    requestUndo,
+    respondToUndo,
     _internalSocketRef: socketRef,
   };
 }

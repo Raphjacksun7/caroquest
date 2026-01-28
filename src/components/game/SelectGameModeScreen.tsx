@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
-import type { GameMode, AIDifficulty } from "@/lib/types";
+import type { GameMode, AIStrategy } from "@/lib/types";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Bot, Users, Wifi, Copy, Link as LinkIcon, Loader2 } from "lucide-react";
+import { Bot, Users, Wifi, Copy, Link as LinkIcon, Loader2, Shield, Swords } from "lucide-react";
 
 export interface SelectGameModeScreenProps {
   onStartGameMode: (mode: GameMode) => void;
@@ -22,8 +22,8 @@ export interface SelectGameModeScreenProps {
   setRemotePlayerNameInput: (name: string) => void;
   remoteGameIdInput: string;
   setRemoteGameIdInput: (id: string) => void;
-  aiDifficulty: AIDifficulty;
-  setAiDifficulty: (difficulty: AIDifficulty) => void;
+  aiStrategy: AIStrategy;
+  setAiStrategy: (strategy: AIStrategy) => void;
   isConnecting: boolean;
   gameConnectionError?: string | null;
 }
@@ -38,8 +38,8 @@ export const SelectGameModeScreen: React.FC<SelectGameModeScreenProps> = ({
   setRemotePlayerNameInput,
   remoteGameIdInput,
   setRemoteGameIdInput,
-  aiDifficulty,
-  setAiDifficulty,
+  aiStrategy,
+  setAiStrategy,
   isConnecting,
   gameConnectionError,
 }) => {
@@ -106,19 +106,44 @@ export const SelectGameModeScreen: React.FC<SelectGameModeScreenProps> = ({
             </TabsContent>
 
             <TabsContent value="ai" className="pt-6 space-y-4">
-              {/* Content for AI Tab from original code */}
+              {/* Content for AI Tab */}
               <div className="space-y-2">
                 <Label htmlFor="playerNameAI" className="text-foreground/80">{t("yourName")}</Label>
                 <Input id="playerNameAI" value={player1Name} onChange={(e) => setPlayer1Name(e.target.value)} placeholder={t("enterYourName")} />
               </div>
-              <div className="space-y-2">
-                <Label className="text-foreground/80">{t("aiDifficulty")}</Label>
-                <RadioGroup value={aiDifficulty} onValueChange={(v: string) => setAiDifficulty(v as AIDifficulty)} className="flex space-x-2"> {/* ELIDED for brevity */}
-                  {(["easy", "medium", "hard"] as AIDifficulty[]).map((d) => (
-                    <Label key={d} htmlFor={`diff-${d}`} /* ...props */> {/* ELIDED for brevity */}
-                      <RadioGroupItem value={d} id={`diff-${d}`} /> <span className="capitalize text-sm">{t(d)}</span>
-                    </Label>
-                  ))}
+              <div className="space-y-3">
+                <Label className="text-foreground/80">{t("aiStrategy")}</Label>
+                <RadioGroup 
+                  value={aiStrategy} 
+                  onValueChange={(v: string) => setAiStrategy(v as AIStrategy)} 
+                  className="grid grid-cols-2 gap-3"
+                >
+                  <Label 
+                    htmlFor="strategy-normal" 
+                    className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                      aiStrategy === 'normal' 
+                        ? 'border-primary bg-primary/10' 
+                        : 'border-muted hover:border-primary/50'
+                    }`}
+                  >
+                    <RadioGroupItem value="normal" id="strategy-normal" className="sr-only" />
+                    <Swords className="h-6 w-6 text-primary" />
+                    <span className="font-medium">{t("strategyNormal")}</span>
+                    <span className="text-xs text-muted-foreground text-center">{t("strategyNormalDesc")}</span>
+                  </Label>
+                  <Label 
+                    htmlFor="strategy-aggressive" 
+                    className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                      aiStrategy === 'aggressive' 
+                        ? 'border-primary bg-primary/10' 
+                        : 'border-muted hover:border-primary/50'
+                    }`}
+                  >
+                    <RadioGroupItem value="aggressive" id="strategy-aggressive" className="sr-only" />
+                    <Shield className="h-6 w-6 text-destructive" />
+                    <span className="font-medium">{t("strategyAggressive")}</span>
+                    <span className="text-xs text-muted-foreground text-center">{t("strategyAggressiveDesc")}</span>
+                  </Label>
                 </RadioGroup>
               </div>
               <Button onClick={() => onStartGameMode("ai")} className="w-full">

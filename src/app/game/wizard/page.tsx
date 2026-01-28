@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { GameMode } from "@/lib/types";
 import { PAWNS_PER_PLAYER } from "@/lib/gameLogic";
 
@@ -26,8 +26,8 @@ export default function WizardGamePage() {
   const {
     player1NameLocal,
     setPlayer1NameLocal,
-    currentAiDifficulty,
-    setCurrentAiDifficulty,
+    currentAiStrategy,
+    setCurrentAiStrategy,
   } = useGameSetup({ gameIdFromUrl: "" });
 
   const { t, currentLanguage, setLanguage } = useTranslation();
@@ -44,28 +44,36 @@ export default function WizardGamePage() {
     handleLocalPawnDragStart,
     handleLocalPawnDrop,
     resetLocalGame,
+    handleUndo,
+    handleRedo,
+    canUndo,
+    canRedo,
   } = useLocalGame({
-    aiDifficulty: currentAiDifficulty,
+    aiStrategy: currentAiStrategy,
     gameMode,
     initialOptions: initialGameOptions,
   });
 
   const gameConnection = useGameConnection();
+  const hasRestoredRef = useRef(false);
 
-  // Restore saved data after hydration
+  // Restore saved data after hydration (only once on mount)
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || hasRestoredRef.current) return;
     
     const savedName = loadSafe('ai_player_name', '');
-    const savedDifficulty = loadSafe('ai_difficulty', 'medium');
+    const savedStrategy = loadSafe('ai_strategy', 'normal');
     
     if (savedName && savedName !== player1NameLocal) {
       setPlayer1NameLocal(savedName);
     }
-    if (savedDifficulty !== currentAiDifficulty) {
-      setCurrentAiDifficulty(savedDifficulty);
+    if (savedStrategy !== currentAiStrategy) {
+      setCurrentAiStrategy(savedStrategy);
     }
-  }, [isHydrated, loadSafe, player1NameLocal, currentAiDifficulty, setPlayer1NameLocal, setCurrentAiDifficulty]);
+    
+    hasRestoredRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated]); // Only run once when hydrated
 
   // Save when changed
   useEffect(() => {
@@ -75,12 +83,12 @@ export default function WizardGamePage() {
   }, [player1NameLocal, save, t]);
 
   useEffect(() => {
-    save('ai_difficulty', currentAiDifficulty);
-  }, [currentAiDifficulty, save]);
+    save('ai_strategy', currentAiStrategy);
+  }, [currentAiStrategy, save]);
 
   const goBackToMenu = useCallback(() => {
     remove('ai_player_name');
-    remove('ai_difficulty');
+    remove('ai_strategy');
     router.push("/");
   }, [router, remove]);
 
@@ -101,8 +109,8 @@ export default function WizardGamePage() {
     setRemotePlayerNameInput: () => {},
     remoteGameIdInput: "",
     setRemoteGameIdInput: () => {},
-    aiDifficulty: currentAiDifficulty,
-    setAiDifficulty: setCurrentAiDifficulty,
+    aiStrategy: currentAiStrategy,
+    setAiStrategy: setCurrentAiStrategy,
     isConnecting: false,
     gameConnectionError: null,
     isFromSharedLink: false,
@@ -125,6 +133,14 @@ export default function WizardGamePage() {
     onCopyGameLink: () => {},
     onGoBackToMenu: goBackToMenu,
     onSetLanguage: setLanguage,
+    // Undo/Redo for AI game
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    canUndo,
+    canRedo,
+    // AI Strategy toggle (AI mode only)
+    currentAiStrategy: currentAiStrategy,
+    onAiStrategyChange: setCurrentAiStrategy,
   };
 
   return (

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect }  from "react";
-import type { GameState, AIDifficulty, GameMode } from "@/lib/types";
+import { useState, useCallback, useEffect, useRef }  from "react";
+import type { GameState, AIStrategy, GameMode, GameAction } from "@/lib/types";
 import {
   createInitialGameState,
   placePawn as placePawnLogic,
@@ -14,14 +14,15 @@ import {
 import { useAI } from "@/hooks/useAI";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useGameHistory } from "@/hooks/useGameHistory";
 
 interface UseLocalGameProps {
-  aiDifficulty: AIDifficulty;
+  aiStrategy: AIStrategy;
   gameMode: GameMode; // To know if AI should be active
   initialOptions?: Partial<GameState["options"]>;
 }
 
-export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLocalGameProps) {
+export function useLocalGame({ aiStrategy, gameMode, initialOptions }: UseLocalGameProps) {
   const [localGameState, setLocalGameState] = useState<GameState>(() =>
     createInitialGameState({ pawnsPerPlayer: PAWNS_PER_PLAYER, ...initialOptions })
   );
@@ -31,10 +32,38 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
     calculateBestMove,
     isLoading: isAILoading,
     error: aiError,
-  } = useAI(aiDifficulty);
+  } = useAI(aiStrategy);
+  
+  // Game history for undo/redo functionality
+  const {
+    pushState: pushHistoryState,
+    initHistory,
+    undo: undoHistory,
+    canUndo,
+    canRedo,
+    redo: redoHistory,
+    clearHistory,
+  } = useGameHistory({ maxHistorySize: 50 });
+  
+  // Track if we're in the middle of an undo operation (to prevent AI from responding)
+  const isUndoingRef = useRef(false);
+  // Track the last AI action for proper undo (undo both player + AI moves)
+  const pendingAIUndoRef = useRef(false);
+  
+  // Initialize history when game starts
+  useEffect(() => {
+    initHistory(localGameState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only on mount
 
   // Effect for AI's turn
   useEffect(() => {
+    // Skip AI turn if we're in the middle of an undo operation
+    if (isUndoingRef.current) {
+      console.log("CLIENT (AI Hook): Skipping AI turn - undo in progress");
+      return;
+    }
+    
     if (
       gameMode === "ai" &&
       localGameState?.currentPlayerId === 2 && // AI is Player 2
@@ -42,6 +71,12 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
       !isAILoading
     ) {
       const timerId = setTimeout(async () => {
+        // Double-check undo state after timeout
+        if (isUndoingRef.current) {
+          console.log("CLIENT (AI Hook): Aborting AI turn - undo triggered during delay");
+          return;
+        }
+        
         if (!localGameState) return;
         console.log("CLIENT (AI Hook): AI's turn. Calculating move...", {
           phase: localGameState.gamePhase,
@@ -88,12 +123,16 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
         let nextState: GameState | null = null;
         const actingPlayerIdForAI = clonedState.currentPlayerId;
 
+        // Build the action for history
+        let historyAction: GameAction;
+        
         if (aiAction.type === "place" && aiAction.squareIndex !== undefined) {
           nextState = placePawnLogic(
             localGameState,
             aiAction.squareIndex,
             actingPlayerIdForAI
           );
+          historyAction = { type: 'place', squareIndex: aiAction.squareIndex };
         } else if (
           aiAction.type === "move" &&
           aiAction.fromIndex !== undefined &&
@@ -105,6 +144,7 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
             aiAction.toIndex,
             actingPlayerIdForAI
           );
+          historyAction = { type: 'move', fromIndex: aiAction.fromIndex, toIndex: aiAction.toIndex };
         } else {
           console.error("CLIENT (AI Hook): AI action has invalid format:", aiAction);
           return;
@@ -112,6 +152,8 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
         
         if (nextState) {
           console.log("CLIENT (AI Hook): Applying AI move. New turn:", nextState.currentPlayerId);
+          // Push AI's move to history
+          pushHistoryState(nextState, historyAction, 2);
           setLocalGameState(nextState);
         } else {
           console.error("CLIENT (AI Hook): Move resulted in null state. Action was:", aiAction);
@@ -119,7 +161,7 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
       }, 700);
       return () => clearTimeout(timerId);
     }
-  }, [gameMode, localGameState, calculateBestMove, isAILoading]);
+  }, [gameMode, localGameState, calculateBestMove, isAILoading, pushHistoryState]);
 
 
   useEffect(() => {
@@ -144,11 +186,14 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
       console.log(`CLIENT (LocalGame Hook): Square ${index} clicked. Player P${actingPlayerId}'s turn. Phase: ${localGameState.gamePhase}`);
 
       let newState: GameState | null = null;
+      let historyAction: GameAction | null = null;
       const square = localGameState.board[index];
 
       if (localGameState.gamePhase === "placement") {
         newState = placePawnLogic(localGameState, index, actingPlayerId);
-        if (!newState) {
+        if (newState) {
+          historyAction = { type: 'place', squareIndex: index };
+        } else {
           toast({
             title: t("invalidPlacement"),
             description: t("invalidPlacementDescription"),
@@ -159,16 +204,23 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
         if (localGameState.selectedPawnIndex === null) {
           if (square.pawn && square.pawn.playerId === actingPlayerId && !localGameState.blockedPawnsInfo.has(index)) {
             newState = highlightValidMoves(localGameState, index);
+            // Selection is not a "move" - don't push to history
           } else if (square.pawn && localGameState.blockedPawnsInfo.has(index)) {
             toast({ title: t("pawnBlocked"), description: t("pawnBlockedDescription"), variant: "destructive" });
           }
         } else {
           if (localGameState.selectedPawnIndex === index) { // Deselect
             newState = clearHighlights(localGameState);
+            // Deselection is not a "move" - don't push to history
           } else if (square.highlight === "validMove") { // Move
-            newState = movePawnLogic(localGameState, localGameState.selectedPawnIndex, index, actingPlayerId);
+            const fromIndex = localGameState.selectedPawnIndex;
+            newState = movePawnLogic(localGameState, fromIndex, index, actingPlayerId);
+            if (newState) {
+              historyAction = { type: 'move', fromIndex, toIndex: index };
+            }
           } else if (square.pawn && square.pawn.playerId === actingPlayerId && !localGameState.blockedPawnsInfo.has(index)) { // Reselect another pawn
             newState = highlightValidMoves(localGameState, index);
+            // Reselection is not a "move" - don't push to history
           } else { // Invalid click
             newState = clearHighlights(localGameState);
           }
@@ -176,10 +228,14 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
       }
 
       if (newState) {
+        // Only push to history if this was an actual game action (not just selection/deselection)
+        if (historyAction) {
+          pushHistoryState(newState, historyAction, actingPlayerId);
+        }
         setLocalGameState(newState);
       }
     },
-    [localGameState, gameMode, isAILoading, toast, t]
+    [localGameState, gameMode, isAILoading, toast, t, pushHistoryState]
   );
 
   const handlePawnDragStart = useCallback((pawnIndex: number) => {
@@ -208,8 +264,11 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
     if (targetSquare.highlight === "validMove") {
       console.log(`CLIENT (LocalGame Hook): Pawn dropped on valid square ${targetIndex}.`);
       const actingPlayerId = localGameState.currentPlayerId;
-      const newState = movePawnLogic(localGameState, localGameState.selectedPawnIndex, targetIndex, actingPlayerId);
+      const fromIndex = localGameState.selectedPawnIndex;
+      const newState = movePawnLogic(localGameState, fromIndex, targetIndex, actingPlayerId);
       if (newState) {
+        // Push to history
+        pushHistoryState(newState, { type: 'move', fromIndex, toIndex: targetIndex }, actingPlayerId);
         setLocalGameState(newState);
       } else {
         setLocalGameState(clearHighlights(localGameState));
@@ -218,14 +277,101 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
       toast({ title: t("invalidDrop"), description: t("invalidDropDescription"), variant: "destructive" });
       setLocalGameState(clearHighlights(localGameState));
     }
-  }, [localGameState, toast, t]);
+  }, [localGameState, toast, t, pushHistoryState]);
 
 
   const resetGame = useCallback((options?: Partial<GameState["options"]>) => {
     const newOptions = { ...initialOptions, ...options, pawnsPerPlayer: PAWNS_PER_PLAYER };
-    setLocalGameState(createInitialGameState(newOptions));
+    const newState = createInitialGameState(newOptions);
+    setLocalGameState(newState);
+    // Clear and reinitialize history
+    clearHistory();
+    initHistory(newState);
     toast({ title: t("gameReset"), description: t("gameResetDescription") });
-  }, [toast, t, initialOptions]);
+  }, [toast, t, initialOptions, clearHistory, initHistory]);
+
+  /**
+   * Undo the last move(s).
+   * - In AI mode: Undoes both the AI's move and the player's previous move (2 steps)
+   * - In local mode: Undoes just the last move (1 step)
+   * 
+   * Returns true if undo was successful, false otherwise.
+   */
+  const handleUndo = useCallback(() => {
+    if (!canUndo) {
+      toast({ 
+        title: t("cannotUndo") || "Cannot Undo", 
+        description: t("cannotUndoDescription") || "No moves to undo",
+        variant: "destructive" 
+      });
+      return false;
+    }
+
+    // Prevent AI from making a move during undo
+    isUndoingRef.current = true;
+
+    // In AI mode, undo 2 moves (player's move + AI's response) if player 1's turn
+    // If it's currently player 1's turn, the last move was AI's, so undo 2
+    // If it's currently player 2's turn (shouldn't happen in AI mode while player is active), undo 1
+    const stepsToUndo = gameMode === "ai" ? 2 : 1;
+    
+    console.log(`CLIENT (LocalGame Hook): Undoing ${stepsToUndo} step(s). Mode: ${gameMode}`);
+    
+    const restoredState = undoHistory(stepsToUndo);
+    
+    if (restoredState) {
+      setLocalGameState(restoredState);
+      toast({ 
+        title: t("moveUndone") || "Move Undone", 
+        description: gameMode === "ai" 
+          ? (t("yourMoveAndAIUndone") || "Your move and AI's response have been undone")
+          : (t("lastMoveUndone") || "Last move has been undone")
+      });
+      
+      // Reset undo flag after a short delay to allow state to settle
+      setTimeout(() => {
+        isUndoingRef.current = false;
+      }, 100);
+      
+      return true;
+    } else {
+      isUndoingRef.current = false;
+      return false;
+    }
+  }, [canUndo, gameMode, undoHistory, toast, t]);
+
+  /**
+   * Redo a previously undone move.
+   * Returns true if redo was successful, false otherwise.
+   */
+  const handleRedo = useCallback(() => {
+    if (!canRedo) {
+      toast({ 
+        title: t("cannotRedo") || "Cannot Redo", 
+        description: t("cannotRedoDescription") || "No moves to redo",
+        variant: "destructive" 
+      });
+      return false;
+    }
+
+    // In AI mode, redo 2 moves to restore both player and AI moves
+    const stepsToRedo = gameMode === "ai" ? 2 : 1;
+    
+    console.log(`CLIENT (LocalGame Hook): Redoing ${stepsToRedo} step(s). Mode: ${gameMode}`);
+    
+    const restoredState = redoHistory(stepsToRedo);
+    
+    if (restoredState) {
+      setLocalGameState(restoredState);
+      toast({ 
+        title: t("moveRedone") || "Move Redone", 
+        description: t("moveRestoredDescription") || "Move has been restored"
+      });
+      return true;
+    }
+    
+    return false;
+  }, [canRedo, gameMode, redoHistory, toast, t]);
 
   return {
     localGameState,
@@ -236,5 +382,10 @@ export function useLocalGame({ aiDifficulty, gameMode, initialOptions }: UseLoca
     handleLocalPawnDrop: handlePawnDrop,
     resetLocalGame: resetGame,
     setLocalGameState, // Expose setter if direct manipulation is needed (e.g. for initial options)
+    // Undo/Redo functionality
+    handleUndo,
+    handleRedo,
+    canUndo,
+    canRedo,
   };
 }

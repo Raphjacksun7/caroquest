@@ -9,7 +9,7 @@ import React, {
 } from "react";
 import type { GameState, PlayerId, GameMode, Locale } from "@/lib/types";
 import { PlayerInfoBar } from "./PlayerInfoBar";
-import { BookOpen, Bug, Home, Languages } from "lucide-react";
+import { BookOpen, Bug, Home, Languages, Undo2, Redo2 } from "lucide-react";
 import { InfoBoxData } from "@/lib/types";
 import { useInfoSystem } from "@/hooks/useInfoSystem";
 import { useGameConnection } from "@/hooks/useGameConnection";
@@ -67,6 +67,11 @@ interface SidePanelProps {
   onGoBackToMenu: () => void;
   onSetLanguage: (lang: Locale) => void;
   currentLanguage: Locale;
+  // Undo/Redo functionality
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 export const SidePanel: React.FC<SidePanelProps> = ({
@@ -82,6 +87,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   onGoBackToMenu,
   onSetLanguage,
   currentLanguage,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
 }) => {
   const gameConnection = useGameConnection();
   const {
@@ -94,9 +103,28 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     addTemporaryInfo,
   } = useInfoSystem();
 
+  // Expose addTemporaryInfo to parent via global (for desktop)
+  React.useEffect(() => {
+    (window as any).__sidePanelAddInfo = (message: string, duration = 3000) => {
+      addTemporaryInfo(
+        {
+          type: "info",
+          message: message,
+          priority: 6,
+        },
+        duration
+      );
+    };
+    return () => {
+      delete (window as any).__sidePanelAddInfo;
+    };
+  }, [addTemporaryInfo]);
+
   const { t } = useTranslation();
 
   const [rematchRequestId, setRematchRequestId] = useState<string | null>(null);
+  const [undoRequestId, setUndoRequestId] = useState<string | null>(null);
+  const [pendingUndoMovesToUndo, setPendingUndoMovesToUndo] = useState<number>(1);
   const socketManager = useMemo(() => SocketManager.getInstance(), []);
   const eventListenersSetup = useRef(false);
   const lastSocketId = useRef<string | null>(null);
@@ -295,6 +323,128 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     [clearInfosByType, addTemporaryInfo]
   );
 
+  // UNDO Event Handlers
+  const handleUndoRequested = useCallback(
+    (data: { requestedBy: string; playerName: string; movesToUndo: number; requesterId: number }) => {
+      console.log("CLIENT: Received undo_requested event:", data);
+
+      clearInfosByType("request");
+      
+      // Store the movesToUndo for when we respond
+      const movesToUndo = data.movesToUndo || 1;
+      setPendingUndoMovesToUndo(movesToUndo);
+
+      // Create a descriptive message based on how many moves will be undone
+      const undoMessage = movesToUndo === 1
+        ? `${data.playerName} wants to undo their move`
+        : `${data.playerName} wants to undo ${movesToUndo} moves`;
+
+      const requestId = addInfo({
+        type: "request",
+        message: undoMessage,
+        persistent: true,
+        priority: 9,
+        actions: [
+          {
+            label: t("accept") || "Accept",
+            onClick: () => {
+              console.log(`CLIENT: Accepting undo request (${movesToUndo} moves)`);
+              try {
+                gameConnection.respondToUndo(true, movesToUndo);
+                removeInfo(requestId);
+                setUndoRequestId(null);
+                setPendingUndoMovesToUndo(1);
+
+                addTemporaryInfo(
+                  {
+                    type: "success",
+                    message: t("undoAccepted") || "Undo accepted",
+                  },
+                  2000
+                );
+              } catch (error: any) {
+                console.error("CLIENT: Error accepting undo:", error);
+                addTemporaryInfo(
+                  {
+                    type: "error",
+                    message: "Failed to accept undo",
+                  },
+                  3000
+                );
+              }
+            },
+            variant: "default",
+          },
+          {
+            label: t("decline") || "Decline",
+            onClick: () => {
+              console.log("CLIENT: Declining undo request");
+              try {
+                gameConnection.respondToUndo(false, movesToUndo);
+                removeInfo(requestId);
+                setUndoRequestId(null);
+                setPendingUndoMovesToUndo(1);
+
+                addTemporaryInfo(
+                  {
+                    type: "info",
+                    message: t("undoDeclined") || "Undo declined",
+                  },
+                  2000
+                );
+              } catch (error: any) {
+                console.error("CLIENT: Error declining undo:", error);
+                addTemporaryInfo(
+                  {
+                    type: "error",
+                    message: "Failed to decline undo",
+                  },
+                  3000
+                );
+              }
+            },
+            variant: "outline",
+          },
+        ],
+      });
+
+      setUndoRequestId(requestId);
+    },
+    [gameConnection, addInfo, removeInfo, clearInfosByType, addTemporaryInfo, t]
+  );
+
+  const handleUndoApplied = useCallback(() => {
+    console.log("CLIENT: Received undo_applied event");
+    clearInfosByType("request");
+    setUndoRequestId(null);
+
+    addTemporaryInfo(
+      {
+        type: "success",
+        message: t("moveUndone") || "Move undone",
+      },
+      3000
+    );
+  }, [clearInfosByType, addTemporaryInfo, t]);
+
+  const handleUndoDeclined = useCallback(
+    (data: { declinedBy: string; playerName: string }) => {
+      console.log("CLIENT: Received undo_declined event:", data);
+      clearInfosByType("request");
+      clearInfosByType("request");
+      setUndoRequestId(null);
+
+      addTemporaryInfo(
+        {
+          type: "info",
+          message: `${data.playerName} ${t("declinedUndo") || "declined your undo request"}`,
+        },
+        4000
+      );
+    },
+    [clearInfosByType, addTemporaryInfo, t]
+  );
+
   // OPTIMIZED: Event listeners setup only once per socket
   useEffect(() => {
     if (gameMode !== "remote") {
@@ -306,22 +456,31 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
     if (socket && socket.connected && !eventListenersSetup.current) {
       console.log(
-        "CLIENT: Setting up rematch event listeners on socket:",
+        "CLIENT: Setting up rematch and undo event listeners on socket:",
         socket.id
       );
 
+      // Rematch events
       socket.on("rematch_requested", handleRematchRequested);
       socket.on("rematch_started", handleRematchStarted);
       socket.on("rematch_declined", handleRematchDeclined);
+      
+      // Undo events
+      socket.on("undo_requested", handleUndoRequested);
+      socket.on("undo_applied", handleUndoApplied);
+      socket.on("undo_declined", handleUndoDeclined);
 
       eventListenersSetup.current = true;
 
       return () => {
-        console.log("CLIENT: Cleaning up rematch event listeners");
+        console.log("CLIENT: Cleaning up rematch and undo event listeners");
         if (socket) {
           socket.off("rematch_requested", handleRematchRequested);
           socket.off("rematch_started", handleRematchStarted);
           socket.off("rematch_declined", handleRematchDeclined);
+          socket.off("undo_requested", handleUndoRequested);
+          socket.off("undo_applied", handleUndoApplied);
+          socket.off("undo_declined", handleUndoDeclined);
         }
         eventListenersSetup.current = false;
       };
@@ -332,6 +491,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     handleRematchRequested,
     handleRematchStarted,
     handleRematchDeclined,
+    handleUndoRequested,
+    handleUndoApplied,
+    handleUndoDeclined,
   ]);
 
   // STABLE: Connection status with optimized dependencies
@@ -509,15 +671,61 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     );
   }, [addTemporaryInfo]);
 
-  const showFlipBoardInfo = useCallback(() => {
-    addTemporaryInfo(
-      {
-        type: "info",
-        message: "Board flipping feature coming soon!",
-      },
-      3000
-    );
-  }, [addTemporaryInfo]);
+  // Handle undo button click
+  const handleUndoClick = useCallback(() => {
+    // For remote mode, send undo request to server
+    if (gameMode === "remote") {
+      const socket = socketManager.getSocket();
+      const gameId = gameConnection.gameId;
+
+      if (!socket || !socket.connected || !gameId) {
+        addTemporaryInfo(
+          {
+            type: "error",
+            message: "Connection error. Please refresh the page.",
+          },
+          5000
+        );
+        return;
+      }
+
+      console.log("CLIENT: Requesting undo for remote game");
+      gameConnection.requestUndo();
+      addTemporaryInfo(
+        {
+          type: "info",
+          message: t("undoRequestSent") || "Undo request sent to opponent",
+        },
+        3000
+      );
+    } else if (onUndo && canUndo) {
+      // For local/AI mode, call the local undo handler
+      onUndo();
+    } else if (!canUndo) {
+      addTemporaryInfo(
+        {
+          type: "info",
+          message: t("noMovesToUndo") || "No moves to undo",
+        },
+        2000
+      );
+    }
+  }, [gameMode, socketManager, gameConnection, onUndo, canUndo, addTemporaryInfo, t]);
+
+  // Handle redo button click (only available for local/AI modes - button hidden in online)
+  const handleRedoClick = useCallback(() => {
+    if (onRedo && canRedo) {
+      onRedo();
+    } else if (!canRedo) {
+      addTemporaryInfo(
+        {
+          type: "info",
+          message: t("noMovesToRedo") || "No moves to redo",
+        },
+        2000
+      );
+    }
+  }, [onRedo, canRedo, addTemporaryInfo, t]);
 
   const DesktopSidePanel = useMemo(
     () => (
@@ -556,25 +764,25 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 </button>
 
                 <button
-                  onClick={showFlipBoardInfo}
-                  className="flex flex-col items-center gap-2 text-gray-600 hover:text-gray-950 transition-colors"
+                  onClick={handleUndoClick}
+                  disabled={(gameMode !== "remote" && !canUndo) || hasWinner}
+                  className={`flex flex-col items-center gap-2 transition-colors ${
+                    (gameMode === "remote" || canUndo) && !hasWinner
+                      ? "text-gray-600 hover:text-gray-950"
+                      : "text-gray-300 cursor-not-allowed"
+                  }`}
+                  title={
+                    gameMode === "remote"
+                      ? (t("requestUndo") || "Request Undo")
+                      : canUndo
+                        ? (t("undo") || "Undo")
+                        : (t("noMovesToUndo") || "No moves to undo")
+                  }
                 >
-                  <div className="w-8 h-8 flex items-center justify-center">
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                  </div>
-                  <span className="text-sm text-gray-700">Flip board</span>
+                  <Undo2 className="h-6 w-6" />
+                  <span className="text-sm">
+                    {gameMode === "remote" ? (t("requestUndo") || "Request Undo") : (t("undo") || "Undo")}
+                  </span>
                 </button>
 
                 <button
@@ -593,24 +801,22 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   <span className="text-sm text-gray-700">Report a bug</span>
                 </button>
 
-                <button className="flex flex-col items-center gap-2 text-gray-600 hover:text-gray-950 transition-colors">
-                  <div className="w-8 h-8 flex items-center justify-center">
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                      />
-                    </svg>
-                  </div>
-                  <span className="text-sm text-gray-700">Chat (soon)</span>
-                </button>
+                {/* Redo button - only shown for local/AI modes, hidden for online */}
+                {gameMode !== "remote" && (
+                  <button
+                    onClick={handleRedoClick}
+                    disabled={!canRedo || hasWinner}
+                    className={`flex flex-col items-center gap-2 transition-colors ${
+                      canRedo && !hasWinner
+                        ? "text-gray-600 hover:text-gray-950"
+                        : "text-gray-300 cursor-not-allowed"
+                    }`}
+                    title={canRedo ? (t("redo") || "Redo") : (t("noMovesToRedo") || "No moves to redo")}
+                  >
+                    <Redo2 className="h-6 w-6" />
+                    <span className="text-sm">{t("redo") || "Redo"}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -653,13 +859,17 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       onResetGame,
       onOpenRules,
       onGoBackToMenu,
-      onGoBackToMenu,
-      showFlipBoardInfo,
+      handleUndoClick,
+      handleRedoClick,
+      canUndo,
+      canRedo,
       handleLanguageSwitch,
       showBugReport,
       handleRematchClick,
       infos,
       localPlayer,
+      gameMode,
+      t,
     ]
   );
 

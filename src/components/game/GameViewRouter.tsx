@@ -20,8 +20,8 @@ interface SelectScreenProps {
   setRemotePlayerNameInput: (name: string) => void;
   remoteGameIdInput: string;
   setRemoteGameIdInput: (id: string) => void;
-  aiDifficulty: 'easy' | 'medium' | 'hard';
-  setAiDifficulty: (difficulty: 'easy' | 'medium' | 'hard') => void;
+  aiStrategy: 'normal' | 'aggressive';
+  setAiStrategy: (strategy: 'normal' | 'aggressive') => void;
   isConnecting: boolean;
   gameConnectionError: string | null;
   // NEW: Add these props for shared link support

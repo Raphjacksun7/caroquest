@@ -1,7 +1,7 @@
 // app/page.tsx - Clean main page without prop dependencies
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { GameMode } from "@/lib/types";
 import {
   PAWNS_PER_PLAYER,
@@ -60,8 +60,8 @@ function CaroQuestPage() {
     setRemotePlayerNameInput,
     remoteGameIdInput,
     setRemoteGameIdInput,
-    currentAiDifficulty,
-    setCurrentAiDifficulty,
+    currentAiStrategy,
+    setCurrentAiStrategy,
   } = useGameSetup({ gameIdFromUrl: "" });
 
   const { t, currentLanguage, setLanguage } = useTranslation();
@@ -80,14 +80,39 @@ function CaroQuestPage() {
     handleLocalPawnDragStart,
     handleLocalPawnDrop,
     resetLocalGame,
+    handleUndo,
+    handleRedo,
+    canUndo,
+    canRedo,
   } = useLocalGame({
-    aiDifficulty: currentAiDifficulty,
+    aiStrategy: currentAiStrategy,
     gameMode,
     initialOptions: initialGameOptions,
   });
 
   const gameConnection = useGameConnection();
   const [isRulesOpen, setIsRulesOpen] = useState(false);
+  const hasRestoredStrategyRef = useRef(false);
+
+  // Restore saved AI strategy after hydration (only once on mount)
+  useEffect(() => {
+    if (!isHydrated || hasRestoredStrategyRef.current) return;
+    
+    const savedStrategy = loadSafe('ai_strategy', 'normal');
+    if (savedStrategy !== currentAiStrategy) {
+      setCurrentAiStrategy(savedStrategy);
+    }
+    
+    hasRestoredStrategyRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated]);
+
+  // Save AI strategy when changed
+  useEffect(() => {
+    if (gameMode === "ai") {
+      save('ai_strategy', currentAiStrategy);
+    }
+  }, [currentAiStrategy, gameMode, save]);
 
   // Update URL based on game mode
   useEffect(() => {
@@ -498,8 +523,8 @@ function CaroQuestPage() {
     setRemotePlayerNameInput,
     remoteGameIdInput,
     setRemoteGameIdInput,
-    aiDifficulty: currentAiDifficulty,
-    setAiDifficulty: setCurrentAiDifficulty,
+    aiStrategy: currentAiStrategy,
+    setAiStrategy: setCurrentAiStrategy,
     isConnecting: gameConnection.isConnecting,
     gameConnectionError: gameConnection.error,
     isFromSharedLink: !!remoteGameIdInput && !gameConnection.isConnected,
@@ -522,6 +547,14 @@ function CaroQuestPage() {
     onCopyGameLink: handleCopyGameLink,
     onGoBackToMenu: goBackToMenu,
     onSetLanguage: setLanguage,
+    // Undo/Redo for local and AI games
+    onUndo: gameMode !== "remote" ? handleUndo : undefined,
+    onRedo: gameMode !== "remote" ? handleRedo : undefined,
+    canUndo: gameMode !== "remote" ? canUndo : false,
+    canRedo: gameMode !== "remote" ? canRedo : false,
+    // AI Strategy toggle (only for AI mode)
+    currentAiStrategy: gameMode === "ai" ? currentAiStrategy : undefined,
+    onAiStrategyChange: gameMode === "ai" ? setCurrentAiStrategy : undefined,
   };
 
   const clientPlayerNameForWaitingRoom = useMemo(() => {

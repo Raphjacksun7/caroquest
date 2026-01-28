@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type {
   GameState,
   GameMode,
-  AIDifficulty,
+  AIStrategy,
 } from "@/lib/types";
 import {
   createInitialGameState,
@@ -69,8 +69,8 @@ interface SelectGameModeScreenProps {
   setRemotePlayerNameInput: (name: string) => void;
   remoteGameIdInput: string;
   setRemoteGameIdInput: (id: string) => void;
-  aiDifficulty: AIDifficulty;
-  setAiDifficulty: (difficulty: AIDifficulty) => void;
+  aiStrategy: AIStrategy;
+  setAiStrategy: (strategy: AIStrategy) => void;
   isConnecting: boolean;
   gameConnectionError?: string | null;
 }
@@ -85,8 +85,8 @@ const SelectGameModeScreen: React.FC<SelectGameModeScreenProps> = ({
   setRemotePlayerNameInput,
   remoteGameIdInput,
   setRemoteGameIdInput,
-  aiDifficulty,
-  setAiDifficulty,
+  aiStrategy,
+  setAiStrategy,
   isConnecting,
   gameConnectionError,
 }) => {
@@ -210,27 +210,28 @@ const SelectGameModeScreen: React.FC<SelectGameModeScreenProps> = ({
               </div>
               <div className="space-y-2">
                 <Label className="text-foreground/80">
-                  {t("aiDifficulty")}
+                  {t("aiStrategy")}
                 </Label>
                 <RadioGroup
-                  value={aiDifficulty}
+                  value={aiStrategy}
                   onValueChange={(v: string) =>
-                    setAiDifficulty(v as AIDifficulty)
+                    setAiStrategy(v as AIStrategy)
                   }
-                  className="flex space-x-2 sm:space-x-4 justify-around p-2 bg-muted rounded-lg"
+                  className="grid grid-cols-2 gap-3 p-2"
                 >
-                  {(["easy", "medium", "hard"] as AIDifficulty[]).map((d) => (
+                  {(["normal", "aggressive"] as AIStrategy[]).map((s) => (
                     <Label
-                      key={d}
-                      htmlFor={`diff-${d}`}
-                      className="flex items-center space-x-2 p-2 px-3 rounded-md hover:bg-accent cursor-pointer has-[:checked]:bg-primary has-[:checked]:text-primary-foreground transition-colors"
+                      key={s}
+                      htmlFor={`strategy-${s}`}
+                      className="flex flex-col items-center gap-2 p-4 rounded-lg border-2 cursor-pointer hover:border-primary/50 has-[:checked]:border-primary has-[:checked]:bg-primary/10 transition-colors"
                     >
                       <RadioGroupItem
-                        value={d}
-                        id={`diff-${d}`}
-                        className="border-foreground data-[state=checked]:border-primary-foreground"
+                        value={s}
+                        id={`strategy-${s}`}
+                        className="sr-only"
                       />
-                      <span className="capitalize text-sm">{t(d)}</span>
+                      <span className="font-medium text-sm">{t(s === "normal" ? "strategyNormal" : "strategyAggressive")}</span>
+                      <span className="text-xs text-muted-foreground text-center">{t(s === "normal" ? "strategyNormalDesc" : "strategyAggressiveDesc")}</span>
                     </Label>
                   ))}
                 </RadioGroup>
@@ -340,8 +341,8 @@ export function StrategicPawnsGame() {
   const [player2NameLocal, setPlayer2NameLocal] = useState("");
   const [remotePlayerNameInput, setRemotePlayerNameInput] = useState("");
   const [remoteGameIdInput, setRemoteGameIdInput] = useState("");
-  const [currentAiDifficulty, setCurrentAiDifficulty] =
-    useState<AIDifficulty>("medium");
+  const [currentAiStrategy, setCurrentAiStrategy] =
+    useState<AIStrategy>("normal");
 
   const {
     gameState: remoteSocketGameState,
@@ -370,7 +371,7 @@ export function StrategicPawnsGame() {
     calculateBestMove,
     isLoading: isAILoading,
     error: aiError,
-  } = useAI(currentAiDifficulty);
+  } = useAI(currentAiStrategy);
 
   const gameIdFromUrl = useMemo(() => {
     const id = Array.isArray(pathParams?.gameId)
@@ -510,7 +511,7 @@ export function StrategicPawnsGame() {
     localGameState,
     calculateBestMove,
     isAILoading,
-    currentAiDifficulty,
+    currentAiStrategy,
   ]);
 
   useEffect(() => {
@@ -995,8 +996,8 @@ export function StrategicPawnsGame() {
         setRemotePlayerNameInput={setRemotePlayerNameInput}
         remoteGameIdInput={remoteGameIdInput}
         setRemoteGameIdInput={setRemoteGameIdInput}
-        aiDifficulty={currentAiDifficulty}
-        setAiDifficulty={setCurrentAiDifficulty}
+        aiStrategy={currentAiStrategy}
+        setAiStrategy={setCurrentAiStrategy}
         isConnecting={isConnecting}
         gameConnectionError={gameConnectionError}
       />

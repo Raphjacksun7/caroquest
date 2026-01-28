@@ -1,45 +1,94 @@
 /**
- * MCTS Web Worker for CaroQuest - FIXED VERSION
+ * MCTS Web Worker for CaroQuest - PROPERLY DIFFERENTIATED STRATEGIES
  * 
- * Critical fixes:
- * 1. Backpropagation now tracks wins from ROOT player's perspective (not flipped)
- * 2. Simulations are properly random for exploration
- * 3. Added tactical layer: immediate win detection and blocking
+ * Normal Mode: Balanced play - prioritize creating own winning threats while
+ *              maintaining reasonable defense. Goal is to WIN quickly.
+ * 
+ * Aggressive Mode: Defensive endurance - prioritize blocking opponent threats
+ *                  but still maintain winning capability. Goal is to BLOCK and outlast.
+ * 
+ * Key insight: Both modes MUST leave openings to win, not just block endlessly.
  */
 
 const BOARD_SIZE = 8;
 
-const DIFFICULTY_CONFIGS = {
-  easy: { iterations: 200, explorationConstant: 2.0, simulationDepth: 15, timeLimit: 300 },
-  medium: { iterations: 1000, explorationConstant: 1.414, simulationDepth: 30, timeLimit: 800 },
-  hard: { iterations: 3000, explorationConstant: 1.414, simulationDepth: 50, timeLimit: 1500 },
-  expert: { iterations: 8000, explorationConstant: 1.2, simulationDepth: 80, timeLimit: 3000 },
+// Strategy configs with DISTINCT scoring parameters
+const STRATEGY_CONFIGS = {
+  normal: {
+    // Fast iterations - heuristic-first
+    baseIterations: 100,
+    maxIterations: 200,
+    explorationConstant: 1.414,  // Standard UCT for balanced exploration
+    maxSimulationDepth: 10,
+    timeLimit: 400,
+    
+    // BALANCED: Favor own threats > blocking
+    ownThreatMultiplier: 1.8,    // Strong preference for creating own threats
+    oppThreatMultiplier: 0.8,    // Moderate concern for opponent threats
+    
+    // Blocking: Low priority - block only when critical
+    blockingBonus: 15,           // Low bonus for blocking opponent pawns
+    ownBlockedPenalty: 25,       // Moderate penalty for own pawns being blocked
+    
+    // Win setup: HIGH priority - actively create winning positions
+    strongThreatBonus: 80,       // Big bonus for creating 3-in-a-row setups
+    weakThreatBonus: 35,         // Good bonus for 2-in-a-row setups
+    
+    // Placement: Less focused on being near opponent
+    placementProximityWeight: 0.3,
+    placementCentralityWeight: 0.5,  // Prefer central positions for flexibility
+  },
+  
+  aggressive: {
+    // Slightly more iterations for deeper blocking analysis
+    baseIterations: 120,
+    maxIterations: 250,
+    explorationConstant: 1.2,   // Lower exploration - exploit known good blocks
+    maxSimulationDepth: 12,
+    timeLimit: 500,
+    
+    // DEFENSIVE: Favor blocking > own threats
+    ownThreatMultiplier: 0.6,    // Own threats still matter but less
+    oppThreatMultiplier: 1.6,    // High concern for opponent threats
+    
+    // Blocking: HIGH priority - actively seek to block
+    blockingBonus: 45,           // High bonus for blocking opponent pawns  
+    ownBlockedPenalty: 30,       // Accept some own pawns being blocked
+    
+    // Win setup: Still important but secondary
+    strongThreatBonus: 50,       // Moderate bonus - don't ignore winning
+    weakThreatBonus: 20,         // Lower bonus for weak setups
+    
+    // Placement: Focus on being near opponent for blocking
+    placementProximityWeight: 0.7,
+    placementCentralityWeight: 0.2,
+  }
 };
 
 // ============================================================================
-// Game Logic (copied from gameLogic.ts for worker isolation)
+// Lightweight Game State Operations - AVOID DEEP CLONING
 // ============================================================================
 
-function cloneGameState(state) {
+function lightClone(state) {
   return {
     board: state.board.map(sq => ({
-      ...sq,
-      pawn: sq.pawn ? { ...sq.pawn } : null
+      index: sq.index,
+      row: sq.row,
+      col: sq.col,
+      boardColor: sq.boardColor,
+      pawn: sq.pawn ? { playerId: sq.pawn.playerId } : null
     })),
     currentPlayerId: state.currentPlayerId,
-    playerColors: { ...state.playerColors },
+    playerColors: state.playerColors,
     gamePhase: state.gamePhase,
     pawnsToPlace: { ...state.pawnsToPlace },
     placedPawns: { ...state.placedPawns },
-    selectedPawnIndex: state.selectedPawnIndex,
     blockedPawnsInfo: new Set(state.blockedPawnsInfo),
     blockingPawnsInfo: new Set(state.blockingPawnsInfo),
     deadZoneSquares: new Map(state.deadZoneSquares),
     deadZoneCreatorPawnsInfo: new Set(state.deadZoneCreatorPawnsInfo),
     winner: state.winner,
-    lastMove: state.lastMove ? { ...state.lastMove } : null,
-    winningLine: state.winningLine ? [...state.winningLine] : null,
-    options: { ...state.options }
+    options: state.options
   };
 }
 
@@ -52,17 +101,18 @@ function isValidPlacement(state, squareIndex, playerId) {
   const { row, col } = square;
   const opponentId = playerId === 1 ? 2 : 1;
 
+  // Check restricted zone (sandwiched)
   if (col > 0 && col < BOARD_SIZE - 1) {
-    const leftSquare = state.board[row * BOARD_SIZE + (col - 1)];
-    const rightSquare = state.board[row * BOARD_SIZE + (col + 1)];
-    if (leftSquare?.pawn?.playerId === opponentId && rightSquare?.pawn?.playerId === opponentId) {
+    const leftSq = state.board[row * BOARD_SIZE + (col - 1)];
+    const rightSq = state.board[row * BOARD_SIZE + (col + 1)];
+    if (leftSq?.pawn?.playerId === opponentId && rightSq?.pawn?.playerId === opponentId) {
       return false;
     }
   }
   if (row > 0 && row < BOARD_SIZE - 1) {
-    const topSquare = state.board[(row - 1) * BOARD_SIZE + col];
-    const bottomSquare = state.board[(row + 1) * BOARD_SIZE + col];
-    if (topSquare?.pawn?.playerId === opponentId && bottomSquare?.pawn?.playerId === opponentId) {
+    const topSq = state.board[(row - 1) * BOARD_SIZE + col];
+    const bottomSq = state.board[(row + 1) * BOARD_SIZE + col];
+    if (topSq?.pawn?.playerId === opponentId && bottomSq?.pawn?.playerId === opponentId) {
       return false;
     }
   }
@@ -82,230 +132,8 @@ function isValidMove(state, fromIndex, toIndex, playerId) {
   return true;
 }
 
-function getValidMoveDestinations(state, fromIndex, playerId) {
-  const validDests = [];
-  const fromSq = state.board[fromIndex];
-  
-  if (!fromSq?.pawn || fromSq.pawn.playerId !== playerId || state.blockedPawnsInfo.has(fromIndex)) {
-    return [];
-  }
-  
-  for (let i = 0; i < 64; i++) {
-    if (isValidMove(state, fromIndex, i, playerId)) {
-      validDests.push(i);
-    }
-  }
-  return validDests;
-}
-
-function updateBlockingStatus(board) {
-  const blockedPawns = new Set();
-  const blockingPawns = new Set();
-
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      const centerIdx = r * BOARD_SIZE + c;
-      const centerSq = board[centerIdx];
-      if (!centerSq?.pawn) continue;
-
-      if (c > 0 && c < BOARD_SIZE - 1) {
-        const leftSq = board[r * BOARD_SIZE + (c - 1)];
-        const rightSq = board[r * BOARD_SIZE + (c + 1)];
-        if (leftSq?.pawn && rightSq?.pawn &&
-            leftSq.pawn.playerId === rightSq.pawn.playerId &&
-            leftSq.pawn.playerId !== centerSq.pawn.playerId) {
-          blockedPawns.add(centerIdx);
-          blockingPawns.add(leftSq.index);
-          blockingPawns.add(rightSq.index);
-        }
-      }
-      if (r > 0 && r < BOARD_SIZE - 1) {
-        const topSq = board[(r - 1) * BOARD_SIZE + c];
-        const bottomSq = board[(r + 1) * BOARD_SIZE + c];
-        if (topSq?.pawn && bottomSq?.pawn &&
-            topSq.pawn.playerId === bottomSq.pawn.playerId &&
-            topSq.pawn.playerId !== centerSq.pawn.playerId) {
-          blockedPawns.add(centerIdx);
-          blockingPawns.add(topSq.index);
-          blockingPawns.add(bottomSq.index);
-        }
-      }
-    }
-  }
-  return { blockedPawns, blockingPawns };
-}
-
-function updateDeadZones(board, playerColors) {
-  const deadZones = new Map();
-  const deadZoneCreatorPawns = new Set();
-
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      const currentSq = board[r * BOARD_SIZE + c];
-      if (currentSq.pawn) continue;
-
-      if (c > 0 && c < BOARD_SIZE - 1) {
-        const leftSq = board[r * BOARD_SIZE + (c - 1)];
-        const rightSq = board[r * BOARD_SIZE + (c + 1)];
-        if (leftSq?.pawn && rightSq?.pawn && leftSq.pawn.playerId === rightSq.pawn.playerId) {
-          const creatorPlayerId = leftSq.pawn.playerId;
-          const opponentPlayerId = creatorPlayerId === 1 ? 2 : 1;
-          if (currentSq.boardColor === playerColors[opponentPlayerId]) {
-            deadZones.set(currentSq.index, opponentPlayerId);
-            deadZoneCreatorPawns.add(leftSq.index);
-            deadZoneCreatorPawns.add(rightSq.index);
-          }
-        }
-      }
-      if (r > 0 && r < BOARD_SIZE - 1) {
-        const topSq = board[(r - 1) * BOARD_SIZE + c];
-        const bottomSq = board[(r + 1) * BOARD_SIZE + c];
-        if (topSq?.pawn && bottomSq?.pawn && topSq.pawn.playerId === bottomSq.pawn.playerId) {
-          const creatorPlayerId = topSq.pawn.playerId;
-          const opponentPlayerId = creatorPlayerId === 1 ? 2 : 1;
-          if (currentSq.boardColor === playerColors[opponentPlayerId]) {
-            deadZones.set(currentSq.index, opponentPlayerId);
-            deadZoneCreatorPawns.add(topSq.index);
-            deadZoneCreatorPawns.add(bottomSq.index);
-          }
-        }
-      }
-    }
-  }
-  return { deadZones, deadZoneCreatorPawns };
-}
-
-function checkWinCondition(state) {
-  const { board, playerColors, deadZoneSquares, blockedPawnsInfo, blockingPawnsInfo, deadZoneCreatorPawnsInfo } = state;
-  const directions = [{ dr: 1, dc: 1 }, { dr: 1, dc: -1 }];
-
-  for (const playerId of [1, 2]) {
-    const playerColor = playerColors[playerId];
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        for (const dir of directions) {
-          const line = [];
-          let possible = true;
-          for (let step = 0; step < 4; step++) {
-            const curR = r + dir.dr * step;
-            const curC = c + dir.dc * step;
-            if (curR < 0 || curR >= BOARD_SIZE || curC < 0 || curC >= BOARD_SIZE) {
-              possible = false;
-              break;
-            }
-            const idx = curR * BOARD_SIZE + curC;
-            const sq = board[idx];
-            if (!sq.pawn || sq.pawn.playerId !== playerId || sq.boardColor !== playerColor ||
-                blockedPawnsInfo.has(idx) || blockingPawnsInfo.has(idx) ||
-                deadZoneCreatorPawnsInfo.has(idx) || deadZoneSquares.get(idx) === playerId) {
-              possible = false;
-              break;
-            }
-            line.push(idx);
-          }
-          if (possible && line.length === 4) {
-            return { winner: playerId, winningLine: line };
-          }
-        }
-      }
-    }
-  }
-  return { winner: null, winningLine: null };
-}
-
-function placePawn(state, squareIndex, playerId) {
-  if (state.currentPlayerId !== playerId) return null;
-  if (!isValidPlacement(state, squareIndex, playerId)) return null;
-
-  const newPawn = {
-    id: `p${playerId}_${state.placedPawns[playerId] + 1}`,
-    playerId: playerId,
-    color: state.playerColors[playerId],
-  };
-
-  const newBoard = state.board.map((sq, i) =>
-    i === squareIndex ? { ...sq, pawn: newPawn, highlight: undefined } : { ...sq, highlight: undefined }
-  );
-
-  const newPawnsToPlace = { ...state.pawnsToPlace, [playerId]: state.pawnsToPlace[playerId] - 1 };
-  const newPlacedPawns = { ...state.placedPawns, [playerId]: state.placedPawns[playerId] + 1 };
-
-  let nextGamePhase = state.gamePhase;
-  if (newPawnsToPlace[1] === 0 && newPawnsToPlace[2] === 0) {
-    nextGamePhase = "movement";
-  }
-
-  const { blockedPawns, blockingPawns } = updateBlockingStatus(newBoard);
-  const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newBoard, state.playerColors);
-
-  const tempState = {
-    ...state,
-    board: newBoard,
-    pawnsToPlace: newPawnsToPlace,
-    placedPawns: newPlacedPawns,
-    gamePhase: nextGamePhase,
-    blockedPawnsInfo: blockedPawns,
-    blockingPawnsInfo: blockingPawns,
-    deadZoneSquares: deadZones,
-    deadZoneCreatorPawnsInfo: deadZoneCreatorPawns,
-    selectedPawnIndex: null,
-    lastMove: { from: null, to: squareIndex },
-    options: { ...state.options },
-  };
-
-  const { winner, winningLine } = checkWinCondition(tempState);
-  const nextPlayerId = playerId === 1 ? 2 : 1;
-
-  return {
-    ...tempState,
-    winner,
-    winningLine,
-    currentPlayerId: winner ? playerId : nextPlayerId,
-  };
-}
-
-function movePawn(state, fromIndex, toIndex, playerId) {
-  if (state.currentPlayerId !== playerId) return null;
-  if (!isValidMove(state, fromIndex, toIndex, playerId)) return null;
-
-  const pawnToMove = state.board[fromIndex].pawn;
-  if (!pawnToMove || pawnToMove.playerId !== playerId) return null;
-
-  const newBoard = state.board.map((sq, i) => {
-    let newSq = { ...sq, highlight: undefined };
-    if (i === fromIndex) return { ...newSq, pawn: null };
-    if (i === toIndex) return { ...newSq, pawn: pawnToMove };
-    return newSq;
-  });
-
-  const { blockedPawns, blockingPawns } = updateBlockingStatus(newBoard);
-  const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newBoard, state.playerColors);
-
-  const tempState = {
-    ...state,
-    board: newBoard,
-    blockedPawnsInfo: blockedPawns,
-    blockingPawnsInfo: blockingPawns,
-    deadZoneSquares: deadZones,
-    deadZoneCreatorPawnsInfo: deadZoneCreatorPawns,
-    selectedPawnIndex: null,
-    lastMove: { from: fromIndex, to: toIndex },
-    options: { ...state.options },
-  };
-
-  const { winner, winningLine } = checkWinCondition(tempState);
-  const nextPlayerId = playerId === 1 ? 2 : 1;
-
-  return {
-    ...tempState,
-    winner,
-    winningLine,
-    currentPlayerId: winner ? playerId : nextPlayerId,
-  };
-}
-
 // ============================================================================
-// Get All Actions Helper
+// Fast Action Generation
 // ============================================================================
 
 function getAllActions(state, playerId) {
@@ -323,9 +151,10 @@ function getAllActions(state, playerId) {
     for (let fromIdx = 0; fromIdx < 64; fromIdx++) {
       const square = state.board[fromIdx];
       if (square.pawn?.playerId === playerId && !state.blockedPawnsInfo.has(fromIdx)) {
-        const destinations = getValidMoveDestinations(state, fromIdx, playerId);
-        for (const toIdx of destinations) {
-          actions.push({ type: "move", fromIndex: fromIdx, toIndex: toIdx });
+        for (let toIdx = 0; toIdx < 64; toIdx++) {
+          if (isValidMove(state, fromIdx, toIdx, playerId)) {
+            actions.push({ type: "move", fromIndex: fromIdx, toIndex: toIdx });
+          }
         }
       }
     }
@@ -334,26 +163,170 @@ function getAllActions(state, playerId) {
   return actions;
 }
 
-function applyAction(state, action, playerId) {
-  const cloned = cloneGameState(state);
-  cloned.currentPlayerId = playerId;
-  
-  if (action.type === "place" && action.squareIndex !== undefined) {
-    return placePawn(cloned, action.squareIndex, playerId);
+// ============================================================================
+// State Update Functions
+// ============================================================================
+
+function updateBlockingStatus(board) {
+  const blockedPawns = new Set();
+  const blockingPawns = new Set();
+
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const centerIdx = r * BOARD_SIZE + c;
+      const centerSq = board[centerIdx];
+      if (!centerSq?.pawn) continue;
+
+      // Horizontal check
+      if (c > 0 && c < BOARD_SIZE - 1) {
+        const leftSq = board[r * BOARD_SIZE + (c - 1)];
+        const rightSq = board[r * BOARD_SIZE + (c + 1)];
+        if (leftSq?.pawn && rightSq?.pawn &&
+            leftSq.pawn.playerId === rightSq.pawn.playerId &&
+            leftSq.pawn.playerId !== centerSq.pawn.playerId) {
+          blockedPawns.add(centerIdx);
+          blockingPawns.add(r * BOARD_SIZE + (c - 1));
+          blockingPawns.add(r * BOARD_SIZE + (c + 1));
+        }
+      }
+      // Vertical check
+      if (r > 0 && r < BOARD_SIZE - 1) {
+        const topSq = board[(r - 1) * BOARD_SIZE + c];
+        const bottomSq = board[(r + 1) * BOARD_SIZE + c];
+        if (topSq?.pawn && bottomSq?.pawn &&
+            topSq.pawn.playerId === bottomSq.pawn.playerId &&
+            topSq.pawn.playerId !== centerSq.pawn.playerId) {
+          blockedPawns.add(centerIdx);
+          blockingPawns.add((r - 1) * BOARD_SIZE + c);
+          blockingPawns.add((r + 1) * BOARD_SIZE + c);
+        }
+      }
+    }
   }
-  if (action.type === "move" && action.fromIndex !== undefined && action.toIndex !== undefined) {
-    return movePawn(cloned, action.fromIndex, action.toIndex, playerId);
+  return { blockedPawns, blockingPawns };
+}
+
+function updateDeadZones(board, playerColors) {
+  const deadZones = new Map();
+  const deadZoneCreatorPawns = new Set();
+
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const currentSq = board[r * BOARD_SIZE + c];
+      if (currentSq.pawn) continue;
+
+      // Horizontal
+      if (c > 0 && c < BOARD_SIZE - 1) {
+        const leftSq = board[r * BOARD_SIZE + (c - 1)];
+        const rightSq = board[r * BOARD_SIZE + (c + 1)];
+        if (leftSq?.pawn && rightSq?.pawn && leftSq.pawn.playerId === rightSq.pawn.playerId) {
+          const creatorId = leftSq.pawn.playerId;
+          const opponentId = creatorId === 1 ? 2 : 1;
+          if (currentSq.boardColor === playerColors[opponentId]) {
+            deadZones.set(currentSq.index, opponentId);
+            deadZoneCreatorPawns.add(r * BOARD_SIZE + (c - 1));
+            deadZoneCreatorPawns.add(r * BOARD_SIZE + (c + 1));
+          }
+        }
+      }
+      // Vertical
+      if (r > 0 && r < BOARD_SIZE - 1) {
+        const topSq = board[(r - 1) * BOARD_SIZE + c];
+        const bottomSq = board[(r + 1) * BOARD_SIZE + c];
+        if (topSq?.pawn && bottomSq?.pawn && topSq.pawn.playerId === bottomSq.pawn.playerId) {
+          const creatorId = topSq.pawn.playerId;
+          const opponentId = creatorId === 1 ? 2 : 1;
+          if (currentSq.boardColor === playerColors[opponentId]) {
+            deadZones.set(currentSq.index, opponentId);
+            deadZoneCreatorPawns.add((r - 1) * BOARD_SIZE + c);
+            deadZoneCreatorPawns.add((r + 1) * BOARD_SIZE + c);
+          }
+        }
+      }
+    }
+  }
+  return { deadZones, deadZoneCreatorPawns };
+}
+
+// Fast win check - only check diagonals
+function checkWin(state) {
+  const { board, playerColors, blockedPawnsInfo, blockingPawnsInfo, deadZoneCreatorPawnsInfo, deadZoneSquares } = state;
+  const directions = [{ dr: 1, dc: 1 }, { dr: 1, dc: -1 }];
+
+  for (const playerId of [1, 2]) {
+    const playerColor = playerColors[playerId];
+    for (let r = 0; r < BOARD_SIZE - 3; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        for (const dir of directions) {
+          const endR = r + dir.dr * 3;
+          const endC = c + dir.dc * 3;
+          if (endR < 0 || endR >= BOARD_SIZE || endC < 0 || endC >= BOARD_SIZE) continue;
+
+          let valid = true;
+          for (let step = 0; step < 4 && valid; step++) {
+            const curR = r + dir.dr * step;
+            const curC = c + dir.dc * step;
+            const idx = curR * BOARD_SIZE + curC;
+            const sq = board[idx];
+            
+            if (!sq.pawn || sq.pawn.playerId !== playerId || sq.boardColor !== playerColor ||
+                blockedPawnsInfo.has(idx) || blockingPawnsInfo.has(idx) ||
+                deadZoneCreatorPawnsInfo.has(idx) || deadZoneSquares.get(idx) === playerId) {
+              valid = false;
+            }
+          }
+          if (valid) return playerId;
+        }
+      }
+    }
   }
   return null;
 }
 
+function applyAction(state, action, playerId) {
+  const newState = lightClone(state);
+  
+  if (action.type === "place" && action.squareIndex !== undefined) {
+    const sq = newState.board[action.squareIndex];
+    if (!sq || sq.pawn) return null;
+    
+    sq.pawn = { playerId };
+    newState.pawnsToPlace[playerId]--;
+    newState.placedPawns[playerId]++;
+    
+    if (newState.pawnsToPlace[1] === 0 && newState.pawnsToPlace[2] === 0) {
+      newState.gamePhase = "movement";
+    }
+  } else if (action.type === "move") {
+    const fromSq = newState.board[action.fromIndex];
+    const toSq = newState.board[action.toIndex];
+    if (!fromSq?.pawn || toSq?.pawn) return null;
+    
+    toSq.pawn = fromSq.pawn;
+    fromSq.pawn = null;
+  } else {
+    return null;
+  }
+
+  const { blockedPawns, blockingPawns } = updateBlockingStatus(newState.board);
+  const { deadZones, deadZoneCreatorPawns } = updateDeadZones(newState.board, newState.playerColors);
+  
+  newState.blockedPawnsInfo = blockedPawns;
+  newState.blockingPawnsInfo = blockingPawns;
+  newState.deadZoneSquares = deadZones;
+  newState.deadZoneCreatorPawnsInfo = deadZoneCreatorPawns;
+  newState.currentPlayerId = playerId === 1 ? 2 : 1;
+  newState.winner = checkWin(newState);
+  
+  return newState;
+}
+
 // ============================================================================
-// Tactical Analysis - Check for immediate wins and blocks
+// PRIORITY 1: Immediate Threat Detection (NO MCTS needed)
 // ============================================================================
 
-function findWinningMove(state, playerId) {
+function findImmediateWin(state, playerId) {
   const actions = getAllActions(state, playerId);
-  
   for (const action of actions) {
     const newState = applyAction(state, action, playerId);
     if (newState && newState.winner === playerId) {
@@ -363,46 +336,38 @@ function findWinningMove(state, playerId) {
   return null;
 }
 
-function findBlockingMove(state, playerId) {
+function findImmediateBlock(state, playerId) {
   const opponentId = playerId === 1 ? 2 : 1;
   
-  // Check if opponent can win on their next turn
-  const opponentActions = getAllActions(state, opponentId);
-  const threateningSquares = [];
+  // Check if opponent can win next turn
+  const oppActions = getAllActions(state, opponentId);
+  const winningOppMoves = [];
   
-  for (const action of opponentActions) {
-    const simState = cloneGameState(state);
+  for (const action of oppActions) {
+    const simState = lightClone(state);
     simState.currentPlayerId = opponentId;
     const newState = applyAction(simState, action, opponentId);
-    
     if (newState && newState.winner === opponentId) {
-      // Opponent can win - need to block
-      if (action.type === "place" && action.squareIndex !== undefined) {
-        threateningSquares.push(action.squareIndex);
-      }
-      if (action.type === "move" && action.toIndex !== undefined) {
-        threateningSquares.push(action.toIndex);
-      }
+      winningOppMoves.push(action);
     }
   }
   
-  if (threateningSquares.length === 0) return null;
+  if (winningOppMoves.length === 0) return null;
   
-  // Find our action that prevents opponent win
+  // Find our move that blocks ALL opponent wins
   const myActions = getAllActions(state, playerId);
   
   for (const action of myActions) {
-    const newState = applyAction(state, action, playerId);
-    if (!newState) continue;
+    const afterMyMove = applyAction(state, action, playerId);
+    if (!afterMyMove) continue;
     
-    // After our move, can opponent still win immediately?
-    const oppActionsAfter = getAllActions(newState, opponentId);
     let canOppWin = false;
+    const oppActionsAfter = getAllActions(afterMyMove, opponentId);
     
-    for (const oppAction of oppActionsAfter) {
-      const simState = cloneGameState(newState);
+    for (const oppA of oppActionsAfter) {
+      const simState = lightClone(afterMyMove);
       simState.currentPlayerId = opponentId;
-      const afterOpp = applyAction(simState, oppAction, opponentId);
+      const afterOpp = applyAction(simState, oppA, opponentId);
       if (afterOpp && afterOpp.winner === opponentId) {
         canOppWin = true;
         break;
@@ -410,7 +375,7 @@ function findBlockingMove(state, playerId) {
     }
     
     if (!canOppWin) {
-      return action; // This move blocks the threat
+      return action;
     }
   }
   
@@ -418,204 +383,362 @@ function findBlockingMove(state, playerId) {
 }
 
 // ============================================================================
-// MCTS Node - FIXED: Always track value from ROOT player's perspective
+// PRIORITY 2: Two-Move Threat Detection
 // ============================================================================
 
-class MCTSNode {
-  constructor(state, parent = null, action = null) {
-    this.state = state;
-    this.parent = parent;
-    this.action = action;
-    this.children = [];
-    this.visits = 0;
-    this.totalValue = 0; // Sum of values from ROOT player's perspective (NOT flipped!)
-    this.untriedActions = this.getValidActions();
-  }
-
-  getValidActions() {
-    const playerId = this.state.currentPlayerId;
-    if (this.state.winner !== null) return [];
+function findTwoMoveWin(state, playerId) {
+  const actions = getAllActions(state, playerId);
+  
+  for (const action of actions) {
+    const afterMove = applyAction(state, action, playerId);
+    if (!afterMove || afterMove.winner) continue;
     
-    const actions = getAllActions(this.state, playerId);
-    
-    // Simple ordering: prefer center/diagonal squares
-    if (this.state.gamePhase === "placement") {
-      actions.sort((a, b) => {
-        const scoreA = this.quickScore(a.squareIndex);
-        const scoreB = this.quickScore(b.squareIndex);
-        return scoreB - scoreA;
-      });
-    }
-    
-    return actions.length > 0 ? actions : [];
-  }
-
-  quickScore(idx) {
-    const row = Math.floor(idx / 8);
-    const col = idx % 8;
-    const centerDist = Math.abs(row - 3.5) + Math.abs(col - 3.5);
-    const onDiagonal = row === col || row === 7 - col;
-    return (onDiagonal ? 3 : 0) - centerDist * 0.5;
-  }
-
-  ucb1(explorationConstant) {
-    if (this.visits === 0) return Infinity;
-    const exploitation = this.totalValue / this.visits;
-    const exploration = explorationConstant * Math.sqrt(Math.log(this.parent.visits) / this.visits);
-    return exploitation + exploration;
-  }
-
-  selectChild(explorationConstant) {
-    let bestChild = null;
-    let bestScore = -Infinity;
-    for (const child of this.children) {
-      const score = child.ucb1(explorationConstant);
-      if (score > bestScore) {
-        bestScore = score;
-        bestChild = child;
-      }
-    }
-    return bestChild;
-  }
-
-  expand() {
-    if (this.untriedActions.length === 0) return null;
-    
-    const action = this.untriedActions.shift();
-    const currentPlayer = this.state.currentPlayerId;
-    const newState = applyAction(this.state, action, currentPlayer);
-    
-    if (!newState) {
-      return this.untriedActions.length > 0 ? this.expand() : null;
-    }
-    
-    const child = new MCTSNode(newState, this, action);
-    this.children.push(child);
-    return child;
-  }
-
-  // FIXED: Simulate with PURE RANDOM playouts
-  // Returns value from ROOT player's perspective
-  simulate(maxDepth, rootPlayerId) {
-    let state = cloneGameState(this.state);
-    let depth = 0;
-    
-    while (state.winner === null && depth < maxDepth) {
-      const actions = getAllActions(state, state.currentPlayerId);
-      if (actions.length === 0) break;
-      
-      // PURE RANDOM selection - critical for MCTS exploration!
-      const chosenAction = actions[Math.floor(Math.random() * actions.length)];
-      const newState = applyAction(state, chosenAction, state.currentPlayerId);
-      
-      if (!newState) break;
-      state = newState;
-      depth++;
-    }
-    
-    // Return result from ROOT player's perspective
-    if (state.winner === rootPlayerId) return 1.0;
-    if (state.winner !== null) return 0.0;
-    
-    // Heuristic for non-terminal
-    return this.evaluateForPlayer(state, rootPlayerId);
-  }
-
-  evaluateForPlayer(state, playerId) {
     const opponentId = playerId === 1 ? 2 : 1;
+    const oppActions = getAllActions(afterMove, opponentId);
     
-    const myThreats = this.countThreats(state, playerId);
-    const oppThreats = this.countThreats(state, opponentId);
+    let guaranteedWin = true;
     
-    let myActive = 0, oppActive = 0;
-    for (let i = 0; i < 64; i++) {
-      const pawn = state.board[i].pawn;
-      if (pawn && !state.blockedPawnsInfo.has(i)) {
-        if (pawn.playerId === playerId) myActive++;
-        else oppActive++;
-      }
-    }
-    
-    let score = 0.5;
-    score += myThreats * 0.1;
-    score -= oppThreats * 0.15;
-    score += (myActive - oppActive) * 0.02;
-    
-    return Math.max(0.1, Math.min(0.9, score));
-  }
-
-  countThreats(state, playerId) {
-    let threats = 0;
-    const myColor = state.playerColors[playerId];
-    const directions = [{ dr: 1, dc: 1 }, { dr: 1, dc: -1 }];
-    
-    for (let row = 0; row < BOARD_SIZE; row++) {
-      for (let col = 0; col < BOARD_SIZE; col++) {
-        const startIdx = row * BOARD_SIZE + col;
-        if (state.board[startIdx].boardColor !== myColor) continue;
-        
-        for (const dir of directions) {
-          let myPawns = 0;
-          let empty = 0;
-          let valid = true;
-          
-          for (let step = 0; step < 4; step++) {
-            const r = row + dir.dr * step;
-            const c = col + dir.dc * step;
-            
-            if (r < 0 || r >= 8 || c < 0 || c >= 8) { valid = false; break; }
-            
-            const idx = r * BOARD_SIZE + c;
-            const sq = state.board[idx];
-            
-            if (sq.boardColor !== myColor) { valid = false; break; }
-            
-            const pawn = sq.pawn;
-            if (pawn?.playerId === playerId && !state.blockedPawnsInfo.has(idx)) {
-              myPawns++;
-            } else if (!pawn) {
-              empty++;
-            } else {
-              valid = false; break;
-            }
-          }
-          
-          if (valid && myPawns >= 2 && myPawns + empty === 4) {
-            threats += myPawns - 1;
-          }
+    for (const oppAction of oppActions) {
+      const afterOpp = applyAction(afterMove, oppAction, opponentId);
+      if (!afterOpp) continue;
+      
+      const ourNextActions = getAllActions(afterOpp, playerId);
+      let canWinAfter = false;
+      
+      for (const ourNext of ourNextActions) {
+        const final = applyAction(afterOpp, ourNext, playerId);
+        if (final && final.winner === playerId) {
+          canWinAfter = true;
+          break;
         }
       }
+      
+      if (!canWinAfter) {
+        guaranteedWin = false;
+        break;
+      }
     }
     
-    return threats;
-  }
-
-  // FIXED: No more value flipping! Values are ALWAYS from root perspective
-  backpropagate(value) {
-    let node = this;
-    while (node) {
-      node.visits++;
-      node.totalValue += value;
-      node = node.parent;
+    if (guaranteedWin && oppActions.length > 0) {
+      return action;
     }
   }
-
-  isTerminal() {
-    return this.state.winner !== null;
-  }
-
-  isFullyExpanded() {
-    return this.untriedActions.length === 0;
-  }
+  
+  return null;
 }
 
 // ============================================================================
-// MCTS Main Function
+// STRATEGY-SPECIFIC SCORING - The Key Differentiation
 // ============================================================================
 
-function findBestAction(state, config, aiPlayerId) {
+function countDiagonalThreats(state, playerId) {
+  const myColor = state.playerColors[playerId];
+  const directions = [{ dr: 1, dc: 1 }, { dr: 1, dc: -1 }];
+  let strong = 0; // 3 in a row with 1 empty (one move from win)
+  let weak = 0;   // 2 in a row with 2 empty (two moves from win)
+  
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      for (const dir of directions) {
+        let myPawns = 0;
+        let empty = 0;
+        let valid = true;
+        
+        for (let step = 0; step < 4 && valid; step++) {
+          const curR = r + dir.dr * step;
+          const curC = c + dir.dc * step;
+          
+          if (curR < 0 || curR >= BOARD_SIZE || curC < 0 || curC >= BOARD_SIZE) {
+            valid = false;
+            continue;
+          }
+          
+          const idx = curR * BOARD_SIZE + curC;
+          const sq = state.board[idx];
+          
+          if (sq.boardColor !== myColor) {
+            valid = false;
+            continue;
+          }
+          
+          const pawn = sq.pawn;
+          if (pawn?.playerId === playerId && !state.blockedPawnsInfo.has(idx) && 
+              !state.blockingPawnsInfo.has(idx) && !state.deadZoneCreatorPawnsInfo.has(idx)) {
+            myPawns++;
+          } else if (!pawn && state.deadZoneSquares.get(idx) !== playerId) {
+            empty++;
+          } else if (pawn?.playerId !== playerId) {
+            valid = false;
+          }
+        }
+        
+        if (valid && myPawns + empty === 4) {
+          if (myPawns === 3) strong++;
+          else if (myPawns === 2) weak++;
+        }
+      }
+    }
+  }
+  
+  return { strong, weak };
+}
+
+function getProximityScore(state, squareIndex, opponentId) {
+  const sq = state.board[squareIndex];
+  const { row, col } = sq;
+  let score = 0;
+  
+  for (let dr = -2; dr <= 2; dr++) {
+    for (let dc = -2; dc <= 2; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      const nr = row + dr;
+      const nc = col + dc;
+      if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+        const idx = nr * BOARD_SIZE + nc;
+        if (state.board[idx].pawn?.playerId === opponentId) {
+          const dist = Math.max(Math.abs(dr), Math.abs(dc));
+          score += (3 - dist);
+        }
+      }
+    }
+  }
+  
+  return score;
+}
+
+function getCentralityScore(squareIndex) {
+  const row = Math.floor(squareIndex / BOARD_SIZE);
+  const col = squareIndex % BOARD_SIZE;
+  
+  // Distance from center (3.5, 3.5)
+  const distFromCenter = Math.abs(row - 3.5) + Math.abs(col - 3.5);
+  
+  // Max distance is 7, normalize to 0-1 and invert (center = 1, edge = 0)
+  return 1 - (distFromCenter / 7);
+}
+
+// Count how many free pawns (not blocked, not blocking) each player has
+function countFreePawns(state, playerId) {
+  let free = 0;
+  for (let i = 0; i < 64; i++) {
+    const sq = state.board[i];
+    if (sq.pawn?.playerId === playerId) {
+      if (!state.blockedPawnsInfo.has(i) && !state.blockingPawnsInfo.has(i)) {
+        free++;
+      }
+    }
+  }
+  return free;
+}
+
+function scoreAction(state, action, playerId, config) {
+  const newState = applyAction(state, action, playerId);
+  if (!newState) return -Infinity;
+  
+  // Immediate outcomes
+  if (newState.winner === playerId) return 10000;
+  if (newState.winner !== null) return -10000;
+  
+  const opponentId = playerId === 1 ? 2 : 1;
+  let score = 0;
+  
+  // =========================================================================
+  // 1. OWN WINNING THREATS - Strategy-weighted
+  // =========================================================================
+  const myThreats = countDiagonalThreats(newState, playerId);
+  const oppThreats = countDiagonalThreats(newState, opponentId);
+  
+  // Normal: Strong bonus for own threats (winning focus)
+  // Aggressive: Moderate bonus for own threats (balanced)
+  score += myThreats.strong * config.strongThreatBonus * config.ownThreatMultiplier;
+  score += myThreats.weak * config.weakThreatBonus * config.ownThreatMultiplier;
+  
+  // =========================================================================
+  // 2. OPPONENT THREAT PENALTIES - Strategy-weighted
+  // =========================================================================
+  // Normal: Moderate penalty (don't obsess over blocking)
+  // Aggressive: High penalty (prioritize stopping opponent)
+  score -= oppThreats.strong * config.strongThreatBonus * config.oppThreatMultiplier;
+  score -= oppThreats.weak * config.weakThreatBonus * config.oppThreatMultiplier;
+  
+  // =========================================================================
+  // 3. BLOCKING STATUS - Strategy-specific bonus/penalty
+  // =========================================================================
+  let myBlocked = 0, oppBlocked = 0;
+  for (const idx of newState.blockedPawnsInfo) {
+    if (newState.board[idx].pawn?.playerId === playerId) myBlocked++;
+    else oppBlocked++;
+  }
+  
+  // Strategy-specific blocking values
+  score += oppBlocked * config.blockingBonus;
+  score -= myBlocked * config.ownBlockedPenalty;
+  
+  // =========================================================================
+  // 4. FREE PAWN COUNT - Ensure we keep options open
+  // =========================================================================
+  const myFreePawns = countFreePawns(newState, playerId);
+  const oppFreePawns = countFreePawns(newState, opponentId);
+  
+  // Bonus for having more free pawns than opponent (flexibility)
+  score += (myFreePawns - oppFreePawns) * 8;
+  
+  // Penalty if we have very few free pawns (can't win!)
+  if (myFreePawns <= 1) {
+    score -= 50; // Danger zone - not enough pawns to create winning line
+  }
+  
+  // =========================================================================
+  // 5. PLACEMENT PHASE BONUSES
+  // =========================================================================
+  if (action.type === "place") {
+    // Proximity to opponent (for potential blocking)
+    const proximityScore = getProximityScore(state, action.squareIndex, opponentId);
+    score += proximityScore * config.placementProximityWeight * 15;
+    
+    // Centrality (for flexibility and more diagonal options)
+    const centralityScore = getCentralityScore(action.squareIndex);
+    score += centralityScore * config.placementCentralityWeight * 20;
+  }
+  
+  // =========================================================================
+  // 6. MOVEMENT PHASE: Avoid wasting pawns on pure blocking
+  // =========================================================================
+  if (action.type === "move") {
+    const toIdx = action.toIndex;
+    
+    // Check if this move contributes to a potential winning line
+    const beforeThreats = countDiagonalThreats(state, playerId);
+    const threatImprovement = (myThreats.strong - beforeThreats.strong) * 2 + 
+                              (myThreats.weak - beforeThreats.weak);
+    
+    score += threatImprovement * 15; // Bonus for moves that improve our threats
+    
+    // Mild preference for moves that don't sacrifice too much mobility
+    if (newState.blockingPawnsInfo.has(toIdx) && !state.blockingPawnsInfo.has(action.fromIndex)) {
+      score -= 10; // Slight penalty for becoming a blocking pawn (reduces mobility)
+    }
+  }
+  
+  // Small randomness to avoid repetitive play
+  score += Math.random() * 3;
+  
+  return score;
+}
+
+// ============================================================================
+// MCTS with Strategy-Aware Scoring
+// ============================================================================
+
+function runMinimalMCTS(state, playerId, config) {
+  const actions = getAllActions(state, playerId);
+  if (actions.length === 0) return null;
+  if (actions.length === 1) return actions[0];
+  
+  // Score all actions with strategy-specific heuristic
+  const scoredActions = actions.map(action => ({
+    action,
+    score: scoreAction(state, action, playerId, config),
+    visits: 0
+  }));
+  
+  // Sort by heuristic score
+  scoredActions.sort((a, b) => b.score - a.score);
+  
+  // If top action is clearly better, just use it
+  if (scoredActions.length > 1 && scoredActions[0].score > scoredActions[1].score + 100) {
+    return scoredActions[0].action;
+  }
+  
+  // Adaptive iterations based on game complexity
+  const blockedCount = state.blockedPawnsInfo.size;
+  const iterationMultiplier = 1 + Math.min(blockedCount * 0.1, 0.5);
+  const iterations = Math.min(
+    Math.floor(config.baseIterations * iterationMultiplier),
+    config.maxIterations
+  );
+  
+  const startTime = Date.now();
+  
+  // Run quick simulations on top candidates only
+  const topCandidates = scoredActions.slice(0, Math.min(5, scoredActions.length));
+  
+  for (let iter = 0; iter < iterations && (Date.now() - startTime) < config.timeLimit; iter++) {
+    const candidate = topCandidates[iter % topCandidates.length];
+    
+    const afterMove = applyAction(state, candidate.action, playerId);
+    if (!afterMove) continue;
+    
+    const result = quickRollout(afterMove, playerId, config);
+    candidate.visits++;
+    
+    // Update score with rollout result
+    candidate.score = candidate.score * 0.9 + result * 100 * 0.1;
+  }
+  
+  // Return best by combined score
+  topCandidates.sort((a, b) => b.score - a.score);
+  
+  console.log(`MCTS: ${iterations} iters, ${Date.now() - startTime}ms, best score: ${topCandidates[0].score.toFixed(1)}`);
+  
+  return topCandidates[0].action;
+}
+
+function quickRollout(state, rootPlayerId, config) {
+  let currentState = state;
+  let depth = 0;
+  
+  while (currentState.winner === null && depth < config.maxSimulationDepth) {
+    const actions = getAllActions(currentState, currentState.currentPlayerId);
+    if (actions.length === 0) break;
+    
+    // Semi-random: 70% random, 30% heuristic-guided
+    let action;
+    if (Math.random() < 0.3 && actions.length > 1) {
+      // Quick heuristic choice
+      const scored = actions.slice(0, 5).map(a => ({
+        action: a,
+        score: scoreAction(currentState, a, currentState.currentPlayerId, config)
+      }));
+      scored.sort((a, b) => b.score - a.score);
+      action = scored[0].action;
+    } else {
+      action = actions[Math.floor(Math.random() * actions.length)];
+    }
+    
+    const newState = applyAction(currentState, action, currentState.currentPlayerId);
+    if (!newState) break;
+    currentState = newState;
+    depth++;
+  }
+  
+  if (currentState.winner === rootPlayerId) return 1.0;
+  if (currentState.winner !== null) return 0.0;
+  
+  // Strategy-aware terminal evaluation
+  const myThreats = countDiagonalThreats(currentState, rootPlayerId);
+  const oppThreats = countDiagonalThreats(currentState, rootPlayerId === 1 ? 2 : 1);
+  
+  // Base score
+  let evalScore = 0.5;
+  
+  // Own threats contribute positively (weighted by strategy)
+  evalScore += myThreats.strong * 0.12 * config.ownThreatMultiplier;
+  evalScore += myThreats.weak * 0.03 * config.ownThreatMultiplier;
+  
+  // Opponent threats contribute negatively (weighted by strategy)
+  evalScore -= oppThreats.strong * 0.12 * config.oppThreatMultiplier;
+  evalScore -= oppThreats.weak * 0.03 * config.oppThreatMultiplier;
+  
+  return Math.max(0, Math.min(1, evalScore));
+}
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
+
+function findBestAction(state, config, aiPlayerId, strategy) {
   if (state.currentPlayerId !== aiPlayerId) {
-    console.log("Not AI's turn");
     return null;
   }
 
@@ -623,7 +746,7 @@ function findBestAction(state, config, aiPlayerId) {
     return null;
   }
 
-  // Convert Sets/Maps from arrays (deserialization)
+  // Deserialize Sets/Maps
   const gameState = {
     ...state,
     blockedPawnsInfo: new Set(state.blockedPawnsInfo || []),
@@ -632,85 +755,35 @@ function findBestAction(state, config, aiPlayerId) {
     deadZoneCreatorPawnsInfo: new Set(state.deadZoneCreatorPawnsInfo || []),
   };
 
-  // ========================================
-  // PRIORITY 1: Tactical moves (immediate wins/blocks)
-  // ========================================
-  
-  const winningMove = findWinningMove(gameState, aiPlayerId);
+  const startTime = Date.now();
+
+  // PRIORITY 1: Immediate win (always take it!)
+  const winningMove = findImmediateWin(gameState, aiPlayerId);
   if (winningMove) {
-    console.log("Worker: Found immediate winning move!");
+    console.log(`[${strategy}] Immediate WIN found in ${Date.now() - startTime}ms`);
     return winningMove;
   }
   
-  const blockingMove = findBlockingMove(gameState, aiPlayerId);
+  // PRIORITY 2: Block immediate opponent win (must do or we lose!)
+  const blockingMove = findImmediateBlock(gameState, aiPlayerId);
   if (blockingMove) {
-    console.log("Worker: Found blocking move!");
+    console.log(`[${strategy}] Immediate BLOCK found in ${Date.now() - startTime}ms`);
     return blockingMove;
   }
 
-  // ========================================
-  // PRIORITY 2: MCTS for positional play
-  // ========================================
+  // PRIORITY 3: Two-move winning threat
+  const twoMoveWin = findTwoMoveWin(gameState, aiPlayerId);
+  if (twoMoveWin) {
+    console.log(`[${strategy}] Two-move WIN threat found in ${Date.now() - startTime}ms`);
+    return twoMoveWin;
+  }
 
-  const rootNode = new MCTSNode(cloneGameState(gameState));
+  // PRIORITY 4: Strategy-specific MCTS with differentiated scoring
+  const bestAction = runMinimalMCTS(gameState, aiPlayerId, config);
   
-  if (rootNode.untriedActions.length === 0) {
-    return null;
-  }
-  if (rootNode.untriedActions.length === 1) {
-    return rootNode.untriedActions[0];
-  }
-
-  const startTime = Date.now();
-  let iterations = 0;
-
-  while (iterations < config.iterations && (Date.now() - startTime) < config.timeLimit) {
-    // 1. Selection
-    let node = rootNode;
-    while (node.isFullyExpanded() && node.children.length > 0 && !node.isTerminal()) {
-      const selected = node.selectChild(config.explorationConstant);
-      if (!selected) break;
-      node = selected;
-    }
-
-    // 2. Expansion
-    if (!node.isTerminal() && !node.isFullyExpanded()) {
-      const expanded = node.expand();
-      if (expanded) node = expanded;
-    }
-
-    // 3. Simulation - ALWAYS from AI's perspective
-    const result = node.simulate(config.simulationDepth, aiPlayerId);
-
-    // 4. Backpropagation
-    node.backpropagate(result);
-    iterations++;
-  }
-
-  // Select best action by visit count (most robust)
-  let bestChild = null;
-  let bestVisits = -1;
-
-  for (const child of rootNode.children) {
-    if (child.visits > bestVisits) {
-      bestVisits = child.visits;
-      bestChild = child;
-    }
-  }
-
-  if (bestChild && bestChild.action) {
-    const winRate = bestChild.visits > 0 
-      ? (bestChild.totalValue / bestChild.visits * 100).toFixed(1) 
-      : "0";
-    console.log(`Worker MCTS: ${winRate}% win rate, ${bestChild.visits} visits, ${iterations} iters, ${Date.now() - startTime}ms`);
-    return bestChild.action;
-  }
-
-  if (rootNode.untriedActions.length > 0) {
-    return rootNode.untriedActions[0];
-  }
-
-  return null;
+  console.log(`[${strategy}] MCTS complete in ${Date.now() - startTime}ms`);
+  
+  return bestAction;
 }
 
 // ============================================================================
@@ -718,12 +791,17 @@ function findBestAction(state, config, aiPlayerId) {
 // ============================================================================
 
 self.onmessage = function(event) {
-  const { type, gameState, difficulty, aiPlayerId } = event.data;
+  const { type, gameState, difficulty, strategy, aiPlayerId } = event.data;
   
   if (type === "CALCULATE_MOVE") {
     try {
-      const config = DIFFICULTY_CONFIGS[difficulty] || DIFFICULTY_CONFIGS.medium;
-      const action = findBestAction(gameState, config, aiPlayerId);
+      // Map old difficulty to strategy
+      const strategyMode = strategy || (difficulty === 'hard' || difficulty === 'expert' ? 'aggressive' : 'normal');
+      const config = STRATEGY_CONFIGS[strategyMode] || STRATEGY_CONFIGS.normal;
+      
+      console.log(`[${strategyMode}] Config: ownThreatMult=${config.ownThreatMultiplier}, oppThreatMult=${config.oppThreatMultiplier}, blockBonus=${config.blockingBonus}`);
+      
+      const action = findBestAction(gameState, config, aiPlayerId, strategyMode);
       
       self.postMessage({
         type: "MOVE_CALCULATED",
@@ -739,4 +817,4 @@ self.onmessage = function(event) {
   }
 };
 
-console.log("MCTS Worker initialized (FIXED version)");
+console.log("MCTS Worker initialized (Strategy-Differentiated)");

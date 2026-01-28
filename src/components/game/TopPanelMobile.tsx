@@ -19,6 +19,7 @@ interface TopPanelMobileProps {
   player2Name: string;
   localPlayerId: PlayerId | null;
   onResetGame: () => void;
+  onShowInfoMessage?: (message: string, duration?: number) => void;
 }
 
 export const TopPanelMobile: React.FC<TopPanelMobileProps> = ({
@@ -28,6 +29,7 @@ export const TopPanelMobile: React.FC<TopPanelMobileProps> = ({
   player2Name,
   localPlayerId,
   onResetGame,
+  onShowInfoMessage,
 }) => {
   const gameConnection = useGameConnection();
   const {
@@ -38,6 +40,26 @@ export const TopPanelMobile: React.FC<TopPanelMobileProps> = ({
     replaceInfo,
     addTemporaryInfo,
   } = useInfoSystem();
+
+  // Expose addTemporaryInfo to parent via callback
+  React.useEffect(() => {
+    if (onShowInfoMessage) {
+      // Replace the callback with our addTemporaryInfo
+      (window as any).__topPanelAddInfo = (message: string, duration = 3000) => {
+        addTemporaryInfo(
+          {
+            type: "info",
+            message: message,
+            priority: 6,
+          },
+          duration
+        );
+      };
+    }
+    return () => {
+      delete (window as any).__topPanelAddInfo;
+    };
+  }, [addTemporaryInfo, onShowInfoMessage]);
 
   const [rematchRequestId, setRematchRequestId] = useState<string | null>(null);
   const eventListenersSetup = useRef(false);
@@ -347,9 +369,10 @@ export const TopPanelMobile: React.FC<TopPanelMobileProps> = ({
   const MobileInfoDisplay = () => {
     const mobileInfos = infos.filter(
       (info) =>
-        (info.priority ?? 0) >= 7 || // High priority messages
+        (info.priority ?? 0) >= 6 || // Medium-high priority messages (includes strategy changes)
         info.type === "error" ||
-        info.type === "success"
+        info.type === "success" ||
+        info.type === "info" // Show info messages like strategy changes
     );
 
     if (mobileInfos.length === 0 && !hasWinner) return null;
